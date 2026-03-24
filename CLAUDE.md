@@ -110,12 +110,21 @@ npx nx run twenty-front:graphql:generate --configuration=metadata
 packages/
 ├── twenty-front/          # React frontend application
 ├── twenty-server/         # NestJS backend API
-├── twenty-ui/             # Shared UI components library
+├── twenty-ui/             # Shared UI components library (uses @linaria/react)
 ├── twenty-shared/         # Common types and utilities
 ├── twenty-emails/         # Email templates with React Email
 ├── twenty-website/        # Next.js documentation website
+├── twenty-docs/           # Documentation site (Mintlify)
 ├── twenty-zapier/         # Zapier integration
-└── twenty-e2e-testing/    # Playwright E2E tests
+├── twenty-e2e-testing/    # Playwright E2E tests
+├── twenty-sdk/            # Published SDK (dual ESM+CJS, replaces twenty-cli)
+├── twenty-client-sdk/     # Client SDK
+├── create-twenty-app/     # CLI to scaffold new Twenty applications
+├── twenty-apps/           # Custom app examples (community, hello-world, internal)
+├── twenty-companion/      # Desktop meeting recorder (Electron app)
+├── twenty-oxlint-rules/   # Custom oxlint lint rules
+├── twenty-docker/         # Docker Compose configurations
+└── twenty-utils/          # Dev utility scripts (setup-dev-env.sh)
 ```
 
 ### Key Development Principles
@@ -174,6 +183,15 @@ packages/
 Use existing helpers from `twenty-shared` instead of manual type guards:
 - `isDefined()`, `isNonEmptyString()`, `isNonEmptyArray()`
 
+### SDK / Published Packages (twenty-sdk, create-twenty-app)
+Both packages publish as dual-format (ESM `.mjs` + CJS `.cjs`). Dependencies are **externalized** by Rollup — they are NOT bundled, so CJS-only deps break the ESM output.
+
+- Only add ESM-compatible dependencies (check for `"type": "module"`, `"exports"` map, or `"module"` field)
+- Use `node:fs/promises` native API instead of `fs-extra` (CJS-only)
+- Use internal `@/cli/utilities/string/kebab-case` instead of `lodash.kebabcase`
+- If a CJS-only package has no ESM replacement, add it to `cjsOnlyPackages` in `vite.config.node.ts` to inline it
+- `twenty-cli` is **deprecated** — use `twenty-sdk` instead
+
 ## Development Workflow
 
 IMPORTANT: Use Context7 for code generation, setup or configuration steps, or library/API documentation. Automatically use the Context7 MCP tools to resolve library IDs and get library docs without waiting for explicit requests.
@@ -221,3 +239,14 @@ This handles everything: starts Postgres + Redis (auto-detects local services vs
 - `tsconfig.base.json` - Base TypeScript configuration
 - `package.json` - Root package with workspace definitions
 - `.cursor/rules/` - Detailed development guidelines and best practices
+- `.mcp.json` - MCP server configuration (read-only Postgres + Playwright)
+
+### Useful Nx Commands
+```bash
+# View project dependency graph
+npx nx graph
+
+# Run target on all affected projects (relative to main)
+npx nx affected --target=test --base=main
+npx nx affected --target=build --base=main
+```
