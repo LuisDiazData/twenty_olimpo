@@ -25,7 +25,16 @@
       "dependsOn": ["^build"],
       "options": {
         "cwd": "packages/twenty-sdk",
-        "command": "npx rimraf dist && npx vite build -c vite.config.node.ts && npx vite build -c vite.config.browser.ts && npx vite build -c vite.config.sdk.ts && tsgo -p tsconfig.lib.json --declaration --emitDeclarationOnly --noEmit false --outDir dist --rootDir src && npx tsc-alias -p tsconfig.lib.json --outDir dist && npx vite build -c vite.config.node.ts --watch & npx vite build -c vite.config.browser.ts --watch & npx vite build -c vite.config.sdk.ts --watch"
+        "parallel": false,
+        "commands": [
+          "npx rimraf dist",
+          "npx vite build -c vite.config.node.ts",
+          "npx vite build -c vite.config.browser.ts",
+          "npx vite build -c vite.config.sdk.ts",
+          "tsgo -p tsconfig.lib.json --declaration --emitDeclarationOnly --noEmit false --outDir dist --rootDir src",
+          "npx tsc-alias -p tsconfig.lib.json --outDir dist",
+          "npx concurrently \"npx vite build -c vite.config.node.ts --watch\" \"npx vite build -c vite.config.browser.ts --watch\" \"npx vite build -c vite.config.sdk.ts --watch\""
+        ]
       }
     },
     "start": {
@@ -70,7 +79,13 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "packages/twenty-sdk",
-        "command": "npx wait-on http://localhost:3000/healthz --timeout 600000 --interval 1000 --log && NODE_ENV=test npx vitest run --config ./vitest.e2e.config.ts"
+        "commands": [
+          "npx wait-on http://localhost:3000/healthz --timeout 600000 --interval 1000 --log",
+          "npx vitest run --config ./vitest.e2e.config.ts"
+        ],
+        "env": {
+          "NODE_ENV": "test"
+        }
       },
       "parallel": false,
       "dependsOn": [

@@ -3,9 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "NODE_ENV=production NODE_OPTIONS=--max-old-space-size=8192 npx vite build && sh ./scripts/inject-runtime-env.sh",
-    "build:sourcemaps": "NODE_ENV=production VITE_BUILD_SOURCEMAP=true NODE_OPTIONS=--max-old-space-size=8192 npx vite build && sh ./scripts/inject-runtime-env.sh",
-    "start:prod": "NODE_ENV=production npx serve -s build",
+    "build": "cross-env NODE_ENV=production NODE_OPTIONS=--max-old-space-size=8192 npx vite build && npx shx sh ./scripts/inject-runtime-env.sh",
+    "build:sourcemaps": "cross-env NODE_ENV=production VITE_BUILD_SOURCEMAP=true NODE_OPTIONS=--max-old-space-size=8192 npx vite build && npx shx sh ./scripts/inject-runtime-env.sh",
+    "start:prod": "cross-env NODE_ENV=production npx serve -s build",
     "tsup": "npx tsup"
   },
   "engines": {

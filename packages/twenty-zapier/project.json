@@ -23,7 +23,10 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{projectRoot}",
-        "commands": ["NODE_ENV=test jest --testTimeout 10000"]
+        "commands": ["jest --testTimeout 10000"],
+        "env": {
+          "NODE_ENV": "test"
+        }
       }
     },
     "lint": {},

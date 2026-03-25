@@ -3,11 +3,18 @@ import { type UserConfig, defineConfig } from 'vite';
 import tsconfigPaths from 'vite-tsconfig-paths';
 
 const isExternal = (id: string): boolean => {
-  if (id.startsWith('.') || id.startsWith('/') || id.startsWith('\0')) {
+  const normalizedId = id.replace(/\\/g, '/');
+
+  if (
+    normalizedId.startsWith('.') ||
+    normalizedId.startsWith('/') ||
+    normalizedId.startsWith('\0') ||
+    /^[a-zA-Z]:\//.test(normalizedId)
+  ) {
     return false;
   }
 
-  if (id.startsWith('src/') || id.startsWith('@/')) {
+  if (normalizedId.startsWith('src/') || normalizedId.startsWith('@/')) {
     return false;
   }
 
