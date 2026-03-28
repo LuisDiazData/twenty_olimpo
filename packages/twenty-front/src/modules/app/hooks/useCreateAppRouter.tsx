@@ -100,6 +100,12 @@ const NotFound = lazy(() =>
   })),
 );
 
+const DashboardPage = lazy(() =>
+  import('~/modules/dashboard/DashboardPage').then((module) => ({
+    default: module.DashboardPage,
+  })),
+);
+
 export const useCreateAppRouter = (
   isFunctionSettingsEnabled?: boolean,
   isAdminPageEnabled?: boolean,
@@ -204,6 +210,14 @@ export const useCreateAppRouter = (
             }
           />
           <Route path={indexAppPath.getIndexAppPath()} element={<></>} />
+          <Route
+            path={AppPath.Dashboard}
+            element={
+              <LazyRoute>
+                <DashboardPage />
+              </LazyRoute>
+            }
+          />
           <Route
             path={AppPath.RecordIndexPage}
             element={

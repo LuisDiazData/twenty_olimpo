@@ -1,0 +1,11 @@
+packages/twenty-server
+packages/twenty-docker
+packages/twenty-e2e-testing
+packages/twenty-companion
+packages/twenty-cli
+packages/twenty-website
+packages/twenty-docs
+packages/twenty-zapier
+packages/twenty-emails
+.git
+*.log

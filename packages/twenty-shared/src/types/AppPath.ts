@@ -31,6 +31,9 @@ export enum AppPath {
 
   Authorize = '/authorize',
 
+  // Dashboard promotoría GNP
+  Dashboard = '/dashboard',
+
   // 404 page not found
   NotFoundWildcard = '*',
   NotFound = '/not-found',
