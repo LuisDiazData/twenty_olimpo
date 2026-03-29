@@ -597,3 +597,33 @@ npx nx affected --target=build --base=main
 - Consultar por elementos visibles al usuario (texto, roles, labels) sobre test IDs
 - Nombres descriptivos: "should [comportamiento] when [condición]"
 - Limpiar mocks entre tests con `jest.clearAllMocks()`
+
+## Contexto del problema
+La promotoría actúa como intermediaria entre agentes de seguros GNP y la aseguradora. Los analistas reciben trámites de los agentes, los revisan y los envían al portal de GNP. El proceso hoy es completamente manual, disperso en correos personales y WhatsApp, sin visibilidad centralizada ni métricas de operación.
+
+## Dolores confirmados
+•	Trámites llegan por correo a cada analista individualmente — no hay bandeja centralizada
+•	Sin visibilidad de estatus: el agente pregunta por WhatsApp cuándo va su trámite
+•	Trámites se pierden cuando un analista no está disponible
+•	Dos analistas pueden trabajar el mismo trámite sin saberlo
+•	El director no sabe cuántos trámites hay abiertos ni cuáles están vencidos
+•	Sin registro de fechas de entrada, límite de SLA ni resolución
+•	GNP rechaza trámites y no hay seguimiento sistemático de las razones
+
+## Estructura organizacional
+•	Directora de Operaciones — visibilidad total, toma de decisiones
+•	Gerentes de ramo (Vida, GMM, Autos, PYME, Daños) — cada uno con su equipo
+•	Especialistas / Analistas — atienden cartera asignada por agente y ramo
+•	Agentes externos — pueden ser individuales, con asistentes o despachos formales
+•	Contactos — personas reales que envían los trámites (pueden ser asistentes del agente)
+
+
+### arquitectura
+- Gmail Fuente del correo entrante
+- n8n Trigger y notificaciones salientes
+- FastAPI Procesamiento, agentes de IA, lógica de negocio
+- Supabase Persistencia, storage de docs, deduplicación
+- RunPod OCR pesado en documentos escaneados
+- Twenty CRM Registro final del Trámite + vista del analista
+- Vercel Frontend si se necesita UI custom (bandeja manual)
+- Railway Deploy de FastAPI

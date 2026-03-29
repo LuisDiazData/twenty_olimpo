@@ -1,0 +1,10 @@
+fastapi>=0.100.0
+uvicorn>=0.23.0
+python-multipart>=0.0.6
+pikepdf>=8.0.0
+pyzipper>=0.3.6
+rarfile>=4.1
+litellm>=1.0.0
+supabase>=2.0.0
+python-dotenv>=1.0.0
+pydantic>=2.0.0

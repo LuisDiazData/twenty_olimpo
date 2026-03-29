@@ -1,0 +1,334 @@
+{
+  "name": "Gmail \u2192 Tr\u00e1mite (v2 con Python Backend)",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "filters": {
+          "readStatus": "unread",
+          "labelIds": []
+        },
+        "options": {
+          "attachmentsPrefix": "attachment_",
+          "downloadAttachments": true
+        }
+      },
+      "id": "gmail-trigger",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepara el payload para RunPod\nconst email = $input.first().json;\n\nconst asunto = email.subject || '';\nconst remitente = email.from?.value?.[0]?.address || email.from || '';\nconst cuerpo = email.text || email.snippet || '';\nconst fecha = email.date || new Date().toISOString();\nconst tieneAdjuntos = (email.attachments || []).length > 0;\nconst adjuntos = (email.attachments || []).map(a => a.name || a.filename || '').join(', ');\n\nconst prompt = `Eres un asistente de una promotor\u00eda de seguros GNP. Analiza este correo y extrae la informaci\u00f3n del tr\u00e1mite en formato JSON.\n\nCORREO:\nDe: ${remitente}\nAsunto: ${asunto}\nFecha: ${fecha}\nAdjuntos: ${adjuntos || 'ninguno'}\nCuerpo:\n${cuerpo.substring(0, 2000)}\n\nExtrae y devuelve SOLO un JSON con esta estructura exacta (sin texto adicional):\n{\n  \"ramo\": \"Vida|GMM|PyMES|Autos|Desconocido\",\n  \"tipoTramite\": \"Emision|Endoso|Siniestro|Renovacion|Cancelacion|Desconocido\",\n  \"nombreAgente\": \"nombre del agente o remitente\",\n  \"emailAgente\": \"email del remitente\",\n  \"claveAgente\": \"clave GNP si se menciona, sino null\",\n  \"nombreAsegurado\": \"nombre del asegurado si se menciona, sino null\",\n  \"numeroPoliza\": \"numero de poliza si se menciona, sino null\",\n  \"monto\": \"monto en numeros si se menciona, sino null\",\n  \"prioridad\": \"Normal|Alta|Urgente\",\n  \"resumen\": \"resumen de 1 oracion del tramite\",\n  \"documentosAdjuntos\": [\"lista de documentos adjuntos\"],\n  \"accionRequerida\": \"que debe hacer el analista\"\n}`;\n\nreturn [{\n  json: {\n    prompt,\n    emailOriginal: {\n      remitente,\n      asunto,\n      fecha,\n      cuerpo: cuerpo.substring(0, 3000),\n      tieneAdjuntos,\n      adjuntos: email.attachments || []\n    }\n  }\n}];"
+      },
+      "id": "prepare-prompt",
+      "name": "Preparar Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.runpod.ai/v2/c2jx606dtqs7g8/run",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "input",
+              "value": "={{ { prompt: $json.prompt } }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "runpod-submit",
+      "name": "RunPod: Enviar Job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "runpod-auth",
+          "name": "RunPod API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 8,
+        "unit": "seconds"
+      },
+      "id": "wait-runpod",
+      "name": "Esperar RunPod",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        300
+      ],
+      "webhookId": "wait-runpod-webhook"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.runpod.ai/v2/c2jx606dtqs7g8/status/{{ $('RunPod: Enviar Job').item.json.id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "runpod-status",
+      "name": "RunPod: Obtener Resultado",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "runpod-auth",
+          "name": "RunPod API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parsear la respuesta de RunPod (Phi-3 via Ollama)\nconst runpodResponse = $input.first().json;\nconst emailOriginal = $('Preparar Prompt').first().json.emailOriginal;\n\nlet tramiteData = {};\n\ntry {\n  // El output de Ollama viene en output[0].choices[0].text\n  const rawText = runpodResponse?.output?.[0]?.choices?.[0]?.text || '';\n  \n  // Extraer el JSON de la respuesta (puede tener texto antes/despu\u00e9s)\n  const jsonMatch = rawText.match(/\\{[\\s\\S]*\\}/);\n  if (jsonMatch) {\n    tramiteData = JSON.parse(jsonMatch[0]);\n  } else {\n    throw new Error('No se encontr\u00f3 JSON en la respuesta');\n  }\n} catch (e) {\n  // Fallback si el modelo no devuelve JSON v\u00e1lido\n  tramiteData = {\n    ramo: 'Desconocido',\n    tipoTramite: 'Desconocido',\n    nombreAgente: emailOriginal.remitente,\n    emailAgente: emailOriginal.remitente,\n    claveAgente: null,\n    nombreAsegurado: null,\n    numeroPoliza: null,\n    monto: null,\n    prioridad: 'Normal',\n    resumen: emailOriginal.asunto,\n    documentosAdjuntos: [],\n    accionRequerida: 'Revisar manualmente'\n  };\n}\n\n// Generar folio interno\nconst ahora = new Date();\nconst folio = `TRM-${ahora.getFullYear()}${String(ahora.getMonth()+1).padStart(2,'0')}${String(ahora.getDate()).padStart(2,'0')}-${Math.random().toString(36).substr(2,6).toUpperCase()}`;\n\nreturn [{\n  json: {\n    folio,\n    ...tramiteData,\n    canalIngreso: 'Correo',\n    estatus: 'RECIBIDO',\n    fechaIngreso: emailOriginal.fecha || ahora.toISOString(),\n    emailOriginal,\n    runpodJobId: $('RunPod: Enviar Job').first().json.id,\n    procesadoEn: ahora.toISOString()\n  }\n}];"
+      },
+      "id": "parse-response",
+      "name": "Parsear Respuesta IA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://aczkvxveenycpnwyqqbs.supabase.co/rest/v1/tramites_pipeline",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "apikey",
+              "value": "sb_publishable_G3rw372qkoXAmoEJBsSuAQ_xsjDUjFE"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"folio\": \"{{ $json.folio }}\",\n  \"ramo\": \"{{ $json.ramo }}\",\n  \"tipo_tramite\": \"{{ $json.tipoTramite }}\",\n  \"estatus\": \"{{ $json.estatus }}\",\n  \"canal_ingreso\": \"{{ $json.canalIngreso }}\",\n  \"nombre_agente\": \"{{ $json.nombreAgente }}\",\n  \"email_agente\": \"{{ $json.emailAgente }}\",\n  \"clave_agente\": {{ $json.claveAgente ? '\"' + $json.claveAgente + '\"' : 'null' }},\n  \"nombre_asegurado\": {{ $json.nombreAsegurado ? '\"' + $json.nombreAsegurado + '\"' : 'null' }},\n  \"numero_poliza\": {{ $json.numeroPoliza ? '\"' + $json.numeroPoliza + '\"' : 'null' }},\n  \"monto\": {{ $json.monto || 'null' }},\n  \"prioridad\": \"{{ $json.prioridad }}\",\n  \"resumen_ia\": \"{{ $json.resumen }}\",\n  \"accion_requerida\": \"{{ $json.accionRequerida }}\",\n  \"correo_asunto\": \"{{ $json.emailOriginal.asunto }}\",\n  \"correo_remitente\": \"{{ $json.emailOriginal.remitente }}\",\n  \"tiene_adjuntos\": {{ $json.emailOriginal.tieneAdjuntos }},\n  \"fecha_ingreso\": \"{{ $json.fechaIngreso }}\",\n  \"metadata_ia\": {{ JSON.stringify({ runpodJobId: $json.runpodJobId, procesadoEn: $json.procesadoEn, documentosAdjuntos: $json.documentosAdjuntos }) }}\n}",
+        "options": {}
+      },
+      "id": "supabase-insert",
+      "name": "Supabase: Guardar Tr\u00e1mite",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "runpod-auth",
+          "name": "RunPod API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log del resultado final\nconst tramite = $('Parsear Respuesta IA').first().json;\nconst supabaseResult = $input.first().json;\n\nconsole.log(`\u2705 Tr\u00e1mite procesado: ${tramite.folio}`);\nconsole.log(`   Ramo: ${tramite.ramo} | Tipo: ${tramite.tipoTramite}`);\nconsole.log(`   Agente: ${tramite.nombreAgente}`);\nconsole.log(`   Prioridad: ${tramite.prioridad}`);\nconsole.log(`   Supabase ID: ${supabaseResult?.[0]?.id || 'N/A'}`);\n\nreturn [{\n  json: {\n    exito: true,\n    folio: tramite.folio,\n    ramo: tramite.ramo,\n    tipoTramite: tramite.tipoTramite,\n    agente: tramite.nombreAgente,\n    prioridad: tramite.prioridad,\n    supabaseId: supabaseResult?.[0]?.id,\n    mensaje: `Tr\u00e1mite ${tramite.folio} creado exitosamente`\n  }\n}];"
+      },
+      "id": "log-result",
+      "name": "Log Resultado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/process-email",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "email_id",
+              "value": "={{ $json.id }}"
+            },
+            {
+              "name": "subject",
+              "value": "={{ $json.subject }}"
+            },
+            {
+              "name": "body",
+              "value": "={{ $json.text || $json.snippet }}"
+            }
+          ]
+        },
+        "options": {},
+        "sendBinaryData": true,
+        "binaryPropertyName": "={{ Object.keys($binary || {}).join(',') }}"
+      },
+      "id": "call-fastapi",
+      "name": "Procesar Adjuntos IA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        350,
+        100
+      ]
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Procesar Adjuntos IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Prompt": {
+      "main": [
+        [
+          {
+            "node": "RunPod: Enviar Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RunPod: Enviar Job": {
+      "main": [
+        [
+          {
+            "node": "Esperar RunPod",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Esperar RunPod": {
+      "main": [
+        [
+          {
+            "node": "RunPod: Obtener Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RunPod: Obtener Resultado": {
+      "main": [
+        [
+          {
+            "node": "Parsear Respuesta IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsear Respuesta IA": {
+      "main": [
+        [
+          {
+            "node": "Supabase: Guardar Tr\u00e1mite",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase: Guardar Tr\u00e1mite": {
+      "main": [
+        [
+          {
+            "node": "Log Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Procesar Adjuntos IA": {
+      "main": [
+        [
+          {
+            "node": "Preparar Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [
+    "gmail",
+    "tramite",
+    "runpod",
+    "supabase"
+  ],
+  "triggerCount": 0,
+  "updatedAt": "2026-03-28T00:00:00.000Z",
+  "versionId": "1"
+}
