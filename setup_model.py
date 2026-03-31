@@ -10,10 +10,15 @@ import urllib.error
 import unicodedata
 import re
 import sys
+import os
+from pathlib import Path
+from dotenv import load_dotenv
 
-ENDPOINT = "http://localhost:3000/metadata"
-TOKEN    = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1MDEzZDMwOS1jOTAyLTQzYzQtYWQ3MC05MzBjYzY1OWU0NzEiLCJ0eXBlIjoiQVBJX0tFWSIsIndvcmtzcGFjZUlkIjoiNTAxM2QzMDktYzkwMi00M2M0LWFkNzAtOTMwY2M2NTllNDcxIiwiaWF0IjoxNzc0NDAzMzAyLCJleHAiOjQ5MjgwMDMzMDEsImp0aSI6IjBkN2E1YTViLTFmYTUtNGI2Ny1iMzEwLWJkYWRiMzkyYTNmNSJ9.DPiIwzGz1lmReVKZcZYqGjb8iJHm38742uFIaYDGf7o"
-WS_MEMBER_ID = "c312bc10-4a79-4fa7-8e2b-ffeddd1b8704"
+load_dotenv(dotenv_path=Path(__file__).parent / ".env")
+
+ENDPOINT     = os.getenv("TWENTY_API_URL", "http://localhost:3000") + "/metadata"
+TOKEN        = "Bearer " + os.getenv("TWENTY_API_KEY", "")
+WS_MEMBER_ID = os.getenv("TWENTY_WS_MEMBER_ID", "c312bc10-4a79-4fa7-8e2b-ffeddd1b8704")
 
 COLORS = ["sky","green","blue","purple","turquoise","pink","red","orange","yellow","gray"]
 summary = {"created": [], "skipped": [], "failed": []}

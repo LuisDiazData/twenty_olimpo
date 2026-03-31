@@ -33,8 +33,8 @@ function loadEnv(envPath) {
   return env;
 }
 
-const env = loadEnv(join(__dirname, '.env'));
-const DB_URL = env['SUPABASE_DB_URL'];
+const env = loadEnv(join(__dirname, '../../.env'));
+const DB_URL = process.env.SUPABASE_DB_URL || env['SUPABASE_DB_URL'];
 
 if (!DB_URL || DB_URL.includes('[YOUR-PASSWORD]')) {
   console.error('❌ SUPABASE_DB_URL no configurado correctamente en .env');

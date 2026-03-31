@@ -1,0 +1,805 @@
+{
+  "name": "Pipeline Trámites v3",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "filters": {
+          "readStatus": "unread",
+          "labelIds": []
+        },
+        "options": {
+          "attachmentsPrefix": "attachment_",
+          "downloadAttachments": true
+        }
+      },
+      "id": "gmail-trigger",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "dOjcZbTWAE6HCxaM",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extraer Message-ID e In-Reply-To de los headers del email\n// n8n Gmail Trigger (mailparser) expone messageId e inReplyTo directamente\nconst email = $input.first().json;\n\nconst rawMessageId = email.messageId || (email.headers && (email.headers['message-id'] || email.headers['Message-ID'])) || email.id || '';\nconst rawInReplyTo = email.inReplyTo || (email.headers && (email.headers['in-reply-to'] || email.headers['In-Reply-To'])) || '';\n\n// Limpiar angle brackets: <abc@mail.com> → abc@mail.com\nconst cleanId = (id) => (id || '').replace(/[<>\\s]/g, '');\n\nconst messageId = cleanId(rawMessageId) || (email.id || '');\nconst inReplyTo = cleanId(rawInReplyTo);\n\nreturn [{\n  json: {\n    ...email,\n    _headers: {\n      messageId,\n      inReplyTo,\n      isReply: !!inReplyTo\n    }\n  }\n}];"
+      },
+      "id": "extract-headers",
+      "name": "Extraer Headers Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:4000/check-reply",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "keypair",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "thread_id",
+              "value": "={{ $json._headers.inReplyTo }}"
+            },
+            {
+              "name": "message_id",
+              "value": "={{ $json._headers.messageId }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "check-reply-api",
+      "name": "Check Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "is-reply-condition",
+              "leftValue": "={{ $json.is_reply }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-is-reply",
+      "name": "IF ¿Es Reply?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:4000/process-reply",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "keypair",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "thread_id",
+              "value": "={{ $('Extraer Headers Email').first().json._headers.inReplyTo }}"
+            },
+            {
+              "name": "message_id",
+              "value": "={{ $('Extraer Headers Email').first().json._headers.messageId }}"
+            },
+            {
+              "name": "tramite_pipeline_id",
+              "value": "={{ $json.tramite_pipeline_id || '' }}"
+            },
+            {
+              "name": "twenty_tramite_id",
+              "value": "={{ $json.twenty_tramite_id || '' }}"
+            },
+            {
+              "name": "email_from",
+              "value": "={{ $('Gmail Trigger').first().json.from?.value?.[0]?.address || $('Gmail Trigger').first().json.from || '' }}"
+            },
+            {
+              "name": "email_subject",
+              "value": "={{ $('Gmail Trigger').first().json.subject || '' }}"
+            },
+            {
+              "name": "email_date",
+              "value": "={{ $('Gmail Trigger').first().json.date || '' }}"
+            },
+            {
+              "name": "email_body",
+              "value": "={{ ($('Gmail Trigger').first().json.text || '').substring(0, 500) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "process-reply-api",
+      "name": "Process Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 160]
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\nconsole.log(`Reply procesado: record_id=${result.record_id}, note_added=${result.note_added}, twenty_id=${result.twenty_tramite_id}`);\nreturn [{ json: { ...result, accion: 'reply_procesado' } }];"
+      },
+      "id": "log-reply",
+      "name": "Log Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 160]
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst email = $('Gmail Trigger').first().json;\nconst headers_data = $('Extraer Headers Email').first().json;\nconst tramite_id = crypto.randomUUID();\nconst now = new Date();\nconst folio = `TRM-${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}-${tramite_id.substring(0,8).toUpperCase()}`;\nconst remitente = email.from?.value?.[0]?.address || (typeof email.from === 'string' ? email.from : '') || '';\nconst nombre_remitente = email.from?.value?.[0]?.name || remitente;\nconst asunto = email.subject || '';\nconst cuerpo = email.text || email.snippet || '';\nconst fecha = email.date || now.toISOString();\nconst message_id = headers_data._headers?.messageId || email.id || '';\nconst tiene_adjuntos = (email.attachments || []).length > 0;\nreturn [{ json: { tramite_id, folio, remitente, nombre_remitente, asunto, cuerpo, cuerpo_html: email.html || '', fecha, message_id, tiene_adjuntos } }];"
+      },
+      "id": "generar-uuid",
+      "name": "Generar UUID Trámite",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 440]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/tramites_pipeline",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_ANON_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_ANON_KEY }}"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ id: $json.tramite_id, status: 'procesando', correo_remitente: $json.remitente, correo_asunto: $json.asunto, thread_id: $json.message_id, message_id: $json.message_id, canal_ingreso: 'Correo', tiene_adjuntos: $json.tiene_adjuntos, fecha_ingreso: $json.fecha }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "supabase-crear",
+      "name": "Supabase: Crear Registro",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, 440]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:4000/process-email",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "email_id",
+              "value": "={{ $('Generar UUID Trámite').first().json.tramite_id }}"
+            },
+            {
+              "name": "subject",
+              "value": "={{ $('Generar UUID Trámite').first().json.asunto }}"
+            },
+            {
+              "name": "body",
+              "value": "={{ $('Generar UUID Trámite').first().json.cuerpo.substring(0, 3000) }}"
+            },
+            {
+              "name": "body_html",
+              "value": "={{ $('Generar UUID Trámite').first().json.cuerpo_html }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "procesar-adjuntos",
+      "name": "Procesar Adjuntos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 440]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:4000/api/v1/agentes/comprension",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ email_id: $('Generar UUID Trámite').first().json.tramite_id, remitente_email: $('Generar UUID Trámite').first().json.remitente, asunto: $('Generar UUID Trámite').first().json.asunto, cuerpo_texto: $('Generar UUID Trámite').first().json.cuerpo.substring(0, 4000) }) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "agente1-comprension",
+      "name": "Agente 1: Comprensión",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1780, 440],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "const resp = $input.first().json; // fullResponse: { statusCode, body }\nconst gen = $('Generar UUID Trámite').first().json;\nconst status = resp.statusCode || 200;\nconst body = resp.body || resp;\nconst error_detectado = status >= 400 || !!body.detail || !!body.error;\nconst error_message = error_detectado ? (body.detail || body.error || `HTTP ${status}`) : null;\nreturn [{ json: {\n  tramite_id: gen.tramite_id, folio: gen.folio, remitente: gen.remitente,\n  nombre_remitente: gen.nombre_remitente, asunto: gen.asunto, cuerpo: gen.cuerpo,\n  fecha: gen.fecha, message_id: gen.message_id, tiene_adjuntos: gen.tiene_adjuntos,\n  error_detectado, error_message,\n  confianza_global: body.confianza_global || 0,\n  tipo_tramite: body.tipo_tramite || null, ramo: body.ramo || null,\n  numero_poliza: body.numero_poliza || null, nombre_asegurado: body.nombre_asegurado || null,\n  agente_cua: body.agente_cua || null, resumen: body.resumen || '',\n  es_duplicado_posible: body.es_duplicado_posible || false,\n  tramite_duplicado_ref: body.tramite_duplicado_ref || null\n}}];"
+      },
+      "id": "evaluar-agente1",
+      "name": "Evaluar Agente 1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 440]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "error-agente1-condition",
+              "leftValue": "={{ $json.error_detectado }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-error-agente1",
+      "name": "IF Error A1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2220, 440]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/pipeline_logs",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_ANON_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_ANON_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ tramite_id: $json.tramite_id, etapa: 'agente1', nivel: 'error', error_message: $json.error_message, contexto: { remitente: $json.remitente, asunto: $json.asunto, http_status: $json.error_message } }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "error-log-supabase",
+      "name": "Error: Log Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2440, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{ $env.TEAM_NOTIFICATION_EMAIL }}",
+        "subject": "=⚠️ Error Pipeline Trámites — {{ $('Evaluar Agente 1').first().json.asunto }}",
+        "emailType": "html",
+        "message": "=<p><strong>Error en el Pipeline de Trámites</strong></p><p><strong>Trámite ID:</strong> {{ $('Evaluar Agente 1').first().json.tramite_id }}</p><p><strong>Etapa:</strong> agente1</p><p><strong>Error:</strong> {{ $('Evaluar Agente 1').first().json.error_message }}</p><p><strong>Remitente:</strong> {{ $('Evaluar Agente 1').first().json.remitente }}</p><p><strong>Timestamp:</strong> {{ new Date().toISOString() }}</p>",
+        "options": {}
+      },
+      "id": "error-email-equipo",
+      "name": "Error: Notificar Equipo",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [2660, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "dOjcZbTWAE6HCxaM",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:4000/api/v1/agentes/documentos",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ tramite_id: $json.tramite_id, documento_ids: [] }) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "agente3-documentos",
+      "name": "Agente 3: Documentos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2440, 580],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:4000/api/v1/agentes/asignacion",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ tramite_id: $('Evaluar Agente 1').first().json.tramite_id }) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "agente4-asignacion",
+      "name": "Agente 4: Asignación",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2660, 580],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "const a4resp = $input.first().json;\nconst a1data = $('Evaluar Agente 1').first().json;\nconst status = a4resp.statusCode || 200;\nconst body = a4resp.body || a4resp;\nconst error_a4 = status >= 400 || !!body.detail;\nconst resultado = error_a4 ? 'error' : (body.resultado || 'error');\nconst folio = body.folio || a1data.folio;\nconst analista_nombre = body.analista?.nombre || 'Especialista asignado';\nconst twenty_tramite_id = body.twenty_tramite_id || null;\nconst motivo = body.motivo || (error_a4 ? (body.detail || `HTTP ${status}`) : null);\nreturn [{ json: {\n  tramite_id: a1data.tramite_id, folio, remitente: a1data.remitente,\n  nombre_remitente: a1data.nombre_remitente, asunto: a1data.asunto,\n  resultado, analista_nombre, twenty_tramite_id, motivo,\n  ramo: a1data.ramo, tipo_tramite: a1data.tipo_tramite,\n  error_a4, error_message_a4: error_a4 ? motivo : null\n}}];"
+      },
+      "id": "evaluar-final",
+      "name": "Evaluar Resultado Final",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2880, 580]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "completado-condition",
+              "leftValue": "={{ $json.resultado }}",
+              "rightValue": "completado",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-completado",
+      "name": "IF Completado",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [3100, 580]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{ $json.remitente }}",
+        "subject": "=Trámite recibido — Folio {{ $json.folio }}",
+        "emailType": "html",
+        "message": "=<p>Estimado/a {{ $json.nombre_remitente }},</p><p>Hemos recibido y procesado su trámite exitosamente.</p><p style=\"font-size:20px;font-weight:bold;color:#1B3A5C;\">Folio: {{ $json.folio }}</p><p>Ha sido asignado al especialista <strong>{{ $json.analista_nombre }}</strong>, quien le contactará en breve.</p><p>Equipo Olimpo Promotoría<br>tramites@olimpo.com.mx</p>",
+        "options": {}
+      },
+      "id": "acuse-completado",
+      "name": "Acuse Completado",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [3320, 460],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "dOjcZbTWAE6HCxaM",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{ $('Evaluar Resultado Final').first().json.remitente }}",
+        "subject": "=Trámite recibido — En verificación",
+        "emailType": "html",
+        "message": "=<p>Estimado/a {{ $('Evaluar Resultado Final').first().json.nombre_remitente }},</p><p>Hemos recibido su solicitud y está siendo revisada por nuestro equipo de especialistas.</p>{{ $('Evaluar Resultado Final').first().json.folio ? '<p>Folio de referencia: <strong>' + $('Evaluar Resultado Final').first().json.folio + '</strong></p>' : '' }}<p>En breve nos pondremos en contacto con usted para confirmar la información o solicitar documentación adicional si fuera necesario.</p><p>Equipo Olimpo Promotoría<br>tramites@olimpo.com.mx</p>",
+        "options": {}
+      },
+      "id": "acuse-revision",
+      "name": "Acuse Revisión Manual",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [3320, 700],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "dOjcZbTWAE6HCxaM",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('Evaluar Resultado Final').first().json;\nconsole.log(`Pipeline finalizado: tramite_id=${data.tramite_id}, folio=${data.folio}, resultado=${data.resultado}`);\nconsole.log(`  Remitente: ${data.remitente}`);\nconsole.log(`  Ramo: ${data.ramo} | Tipo: ${data.tipo_tramite}`);\nconsole.log(`  Analista: ${data.analista_nombre}`);\nconsole.log(`  Twenty ID: ${data.twenty_tramite_id || 'N/A'}`);\nreturn [{ json: {\n  exito: data.resultado === 'completado',\n  tramite_id: data.tramite_id,\n  folio: data.folio,\n  resultado: data.resultado,\n  remitente: data.remitente,\n  ramo: data.ramo,\n  tipo_tramite: data.tipo_tramite,\n  analista_nombre: data.analista_nombre,\n  twenty_tramite_id: data.twenty_tramite_id,\n  timestamp: new Date().toISOString()\n}}];"
+      },
+      "id": "log-final",
+      "name": "Log Final",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3540, 580]
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extraer Headers Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraer Headers Email": {
+      "main": [
+        [
+          {
+            "node": "Check Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Reply": {
+      "main": [
+        [
+          {
+            "node": "IF ¿Es Reply?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF ¿Es Reply?": {
+      "main": [
+        [
+          {
+            "node": "Process Reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generar UUID Trámite",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Reply": {
+      "main": [
+        [
+          {
+            "node": "Log Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generar UUID Trámite": {
+      "main": [
+        [
+          {
+            "node": "Supabase: Crear Registro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase: Crear Registro": {
+      "main": [
+        [
+          {
+            "node": "Procesar Adjuntos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Procesar Adjuntos": {
+      "main": [
+        [
+          {
+            "node": "Agente 1: Comprensión",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agente 1: Comprensión": {
+      "main": [
+        [
+          {
+            "node": "Evaluar Agente 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluar Agente 1": {
+      "main": [
+        [
+          {
+            "node": "IF Error A1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Error A1": {
+      "main": [
+        [
+          {
+            "node": "Error: Log Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Agente 3: Documentos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error: Log Supabase": {
+      "main": [
+        [
+          {
+            "node": "Error: Notificar Equipo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agente 3: Documentos": {
+      "main": [
+        [
+          {
+            "node": "Agente 4: Asignación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agente 4: Asignación": {
+      "main": [
+        [
+          {
+            "node": "Evaluar Resultado Final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluar Resultado Final": {
+      "main": [
+        [
+          {
+            "node": "IF Completado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Completado": {
+      "main": [
+        [
+          {
+            "node": "Acuse Completado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Acuse Revisión Manual",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Acuse Completado": {
+      "main": [
+        [
+          {
+            "node": "Log Final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Acuse Revisión Manual": {
+      "main": [
+        [
+          {
+            "node": "Log Final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [
+    "gmail",
+    "tramite",
+    "agentes",
+    "supabase",
+    "v3"
+  ],
+  "triggerCount": 0,
+  "updatedAt": "2026-03-30T00:00:00.000Z",
+  "versionId": "1"
+}

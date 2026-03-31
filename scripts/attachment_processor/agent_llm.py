@@ -1,14 +1,82 @@
+import base64
 import os
 import json
+import time
+from io import BytesIO
+from pathlib import Path
 from litellm import completion
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).parent.parent.parent / ".env")
 
-# We will use LiteLLM to extract possible passwords from the email text.
-# The user can configure the LITELLM_MODEL in .env (e.g. "openai/gpt-4o", "gemini/gemini-pro")
-# or use their existing RunPod container.
-MODEL_NAME = os.getenv("LITELLM_MODEL", "runpod/c2jx606dtqs7g8") # fallback to the runpod endpoint ID
+MODEL_NAME = os.getenv("LITELLM_MODEL")  # e.g. "runpod/c2jx606dtqs7g8" o "openai/gpt-4o"
+
+
+# ── RunPod OCR ─────────────────────────────────────────────────────────────────
+
+def _llamar_runpod_ocr(imagen_b64: str) -> str:
+    """Send a base64-encoded image to the RunPod serverless endpoint for OCR."""
+    import requests
+
+    endpoint_id = os.environ["RUNPOD_ENDPOINT_ID"]
+    api_key     = os.environ["RUNPOD_API_KEY"]
+    base_url    = f"https://api.runpod.ai/v2/{endpoint_id}"
+
+    # Submit job
+    resp = requests.post(
+        f"{base_url}/run",
+        headers={"Authorization": f"Bearer {api_key}"},
+        json={
+            "input": {
+                "image_base64": imagen_b64,
+                "task": "ocr",
+                "language": "spa",
+            }
+        },
+        timeout=30,
+    )
+    resp.raise_for_status()
+    job_id = resp.json()["id"]
+
+    # Poll until COMPLETED (max 60 s)
+    for _ in range(12):
+        time.sleep(5)
+        status_resp = requests.get(
+            f"{base_url}/status/{job_id}",
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        resultado = status_resp.json()
+        if resultado["status"] == "COMPLETED":
+            return resultado.get("output", {}).get("text", "")
+        if resultado["status"] == "FAILED":
+            raise RuntimeError(f"RunPod OCR falló: {resultado}")
+
+    raise TimeoutError("RunPod OCR no completó en 60 segundos")
+
+
+def ocr_con_runpod(contenido_bytes: bytes, mime_type: str) -> str:
+    """
+    Send an image or scanned PDF to RunPod for OCR.
+    PDF pages are converted to PNG (max 3 pages) before sending.
+    Returns the extracted text.
+    """
+    if mime_type == "application/pdf":
+        from pdf2image import convert_from_bytes  # lazy import
+
+        imagenes = convert_from_bytes(contenido_bytes, first_page=1, last_page=3)
+        textos: list[str] = []
+        for img in imagenes:
+            buf = BytesIO()
+            img.save(buf, format="PNG")
+            img_b64 = base64.b64encode(buf.getvalue()).decode()
+            textos.append(_llamar_runpod_ocr(img_b64))
+        return "\n---\n".join(textos)
+    else:
+        img_b64 = base64.b64encode(contenido_bytes).decode()
+        return _llamar_runpod_ocr(img_b64)
+
+
+# ── Password extraction ────────────────────────────────────────────────────────
 
 def extract_passwords_from_text(email_body: str) -> list[str]:
     """

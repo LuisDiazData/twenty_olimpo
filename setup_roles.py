@@ -10,16 +10,15 @@ Roles a crear:
 Luis Diaz (unico miembro actual) queda como Directora.
 """
 import json, urllib.request, urllib.error
+import os
+from pathlib import Path
+from dotenv import load_dotenv
 
-ENDPOINT = "http://localhost:3000/metadata"
-TOKEN = ("Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
-         ".eyJzdWIiOiI1MDEzZDMwOS1jOTAyLTQzYzQtYWQ3MC05MzBjYzY1OWU0NzEiLCJ0eXBl"
-         "IjoiQVBJX0tFWSIsIndvcmtzcGFjZUlkIjoiNTAxM2QzMDktYzkwMi00M2M0LWFkNzAtOT"
-         "MwY2M2NTllNDcxIiwiaWF0IjoxNzc0NDAzMzAyLCJleHAiOjQ5MjgwMDMzMDEsImp0aSI6"
-         "IjBkN2E1YTViLTFmYTUtNGI2Ny1iMzEwLWJkYWRiMzkyYTNmNSJ9"
-         ".DPiIwzGz1lmReVKZcZYqGjb8iJHm38742uFIaYDGf7o")
+load_dotenv(dotenv_path=Path(__file__).parent / ".env")
 
-WS_MEMBER_LUIS = "96fc35ea-4fa8-4388-956a-22ef62833c21"
+ENDPOINT       = os.getenv("TWENTY_API_URL", "http://localhost:3000") + "/metadata"
+TOKEN          = "Bearer " + os.getenv("TWENTY_API_KEY", "")
+WS_MEMBER_LUIS = os.getenv("TWENTY_WS_MEMBER_ID", "96fc35ea-4fa8-4388-956a-22ef62833c21")
 
 # Object metadata IDs (from id_map + setup run)
 OBJECTS = {

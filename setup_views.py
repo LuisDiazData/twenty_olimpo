@@ -10,14 +10,14 @@ Vista: Mis tramites
 - Posicion: 1 (despues de "All Tramites" que queda como INDEX)
 """
 import json, urllib.request, urllib.error
+import os
+from pathlib import Path
+from dotenv import load_dotenv
 
-ENDPOINT = "http://localhost:3000/metadata"
-TOKEN = ("Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
-         ".eyJzdWIiOiI1MDEzZDMwOS1jOTAyLTQzYzQtYWQ3MC05MzBjYzY1OWU0NzEiLCJ0eXBl"
-         "IjoiQVBJX0tFWSIsIndvcmtzcGFjZUlkIjoiNTAxM2QzMDktYzkwMi00M2M0LWFkNzAtOT"
-         "MwY2M2NTllNDcxIiwiaWF0IjoxNzc0NDAzMzAyLCJleHAiOjQ5MjgwMDMzMDEsImp0aSI6"
-         "IjBkN2E1YTViLTFmYTUtNGI2Ny1iMzEwLWJkYWRiMzkyYTNmNSJ9"
-         ".DPiIwzGz1lmReVKZcZYqGjb8iJHm38742uFIaYDGf7o")
+load_dotenv(dotenv_path=Path(__file__).parent / ".env")
+
+ENDPOINT = os.getenv("TWENTY_API_URL", "http://localhost:3000") + "/metadata"
+TOKEN    = "Bearer " + os.getenv("TWENTY_API_KEY", "")
 
 # Object IDs
 TRAMITE_OBJ_ID = "1c87eb5b-cd45-4c88-ac74-2456bdd9ad85"

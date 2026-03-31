@@ -148,10 +148,18 @@ def process_attachments(attachments: List[Tuple[str, bytes]], email_body: str, g
         try:
             if ext == '.zip':
                 extracted = extract_zip(data, get_pwds())
-                final_files.extend(extracted)
+                if extracted:
+                    final_files.extend(extracted)
+                else:
+                    # Si no se pudo extraer nada (posiblemente por contraseña errónea), guarda el zip original
+                    final_files.append((filename, data))
             elif ext == '.rar':
                 extracted = extract_rar(data, get_pwds())
-                final_files.extend(extracted)
+                if extracted:
+                    final_files.extend(extracted)
+                else:
+                    # Si no se pudo extraer nada, guarda el rar original
+                    final_files.append((filename, data))
             elif ext == '.pdf':
                 clean_pdf_bytes = try_decrypt_pdf(data, get_pwds())
                 final_files.append((filename, clean_pdf_bytes))
@@ -161,8 +169,8 @@ def process_attachments(attachments: List[Tuple[str, bytes]], email_body: str, g
                 
         except Exception as e:
             print(f"Error processing {filename}: {e}")
-            # we could append the original or skip. let's skip if we couldn't decrypt.
-            pass
+            # RESPALDO: Si no logramos desencriptar o hubo cualquier otro error, guardamos el original
+            final_files.append((filename, data))
 
     return {
         "total_received": total_received,

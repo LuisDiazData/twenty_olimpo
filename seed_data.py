@@ -4,15 +4,15 @@ Seed data de prueba para verificar el modelo completo de la promotoria GNP.
 Crea registros en todos los objetos y verifica relaciones.
 """
 import json, urllib.request, urllib.error, sys
+import os
+from pathlib import Path
+from dotenv import load_dotenv
 
-BASE  = "http://localhost:3000/rest"
-TOKEN = ("Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
-         ".eyJzdWIiOiI1MDEzZDMwOS1jOTAyLTQzYzQtYWQ3MC05MzBjYzY1OWU0NzEiLCJ0eXBl"
-         "IjoiQVBJX0tFWSIsIndvcmtzcGFjZUlkIjoiNTAxM2QzMDktYzkwMi00M2M0LWFkNzAtOT"
-         "MwY2M2NTllNDcxIiwiaWF0IjoxNzc0NDAzMzAyLCJleHAiOjQ5MjgwMDMzMDEsImp0aSI6"
-         "IjBkN2E1YTViLTFmYTUtNGI2Ny1iMzEwLWJkYWRiMzkyYTNmNSJ9"
-         ".DPiIwzGz1lmReVKZcZYqGjb8iJHm38742uFIaYDGf7o")
-WS_MEMBER_ID = "96fc35ea-4fa8-4388-956a-22ef62833c21"  # Luis Diaz (workspace member real)
+load_dotenv(dotenv_path=Path(__file__).parent / ".env")
+
+BASE         = os.getenv("TWENTY_API_URL", "http://localhost:3000") + "/rest"
+TOKEN        = "Bearer " + os.getenv("TWENTY_API_KEY", "")
+WS_MEMBER_ID = os.getenv("TWENTY_WS_MEMBER_ID", "96fc35ea-4fa8-4388-956a-22ef62833c21")
 
 ok = 0; fail = 0
 
