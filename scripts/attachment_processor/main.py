@@ -143,28 +143,74 @@ async def _add_note_to_twenty(tramite_id: str, note_text: str) -> bool:
 
 @app.post("/process-email")
 async def process_email(
-    email_id: str = Form(...),
+    # Formato n8n: JSON blob con adjuntos en base64
+    email_data: str = Form(None),
+    # Formato directo (UploadFile): campos separados
+    email_id: str = Form(None),
     subject: str = Form(""),
     body: str = Form(""),
     body_html: str = Form(""),
     attachments: List[UploadFile] = File(None),
 ):
     """
-    Receives email data + attachments from n8n.
-    1. Decrypts / extracts ZIP/RAR attachments (LLM password extraction if needed)
-    2. Uploads processed files to Supabase Storage
-    3. Extracts base64 inline images from HTML body
-    4. Logs everything to attachments_log
+    Recibe datos del correo + adjuntos desde n8n.
+    Soporta dos formatos:
+      1. email_data (JSON string): formato n8n con adjuntos en base64
+      2. Campos Form separados + UploadFile: formato directo
+    Proceso:
+      1. Desencripta / extrae ZIP/RAR (extrae contraseña vía LLM si es necesario)
+      2. Sube archivos procesados a Supabase Storage
+      3. Extrae imágenes inline (base64) del cuerpo HTML
+      4. Registra todo en attachments_log
     """
-    logger.info(f"process-email id={email_id!r} subject={subject!r}")
+    raw_files: list[tuple[str, bytes]] = []
+
+    if email_data:
+        # Formato n8n: parsear JSON blob y reconstruir adjuntos desde base64
+        try:
+            data = json.loads(email_data)
+        except json.JSONDecodeError as e:
+            raise HTTPException(400, f"email_data JSON inválido: {e}")
+
+        email_id = data.get("tramite_id") or data.get("email_id")
+        if not email_id:
+            raise HTTPException(422, "email_data debe contener 'tramite_id' o 'email_id'")
+
+        subject = data.get("asunto") or data.get("subject", "")
+        body = data.get("cuerpo") or data.get("body", "")
+        body_html = data.get("cuerpo_html") or data.get("body_html", "")
+
+        for adj in data.get("adjuntos", []):
+            nombre = adj.get("nombre_archivo") or adj.get("filename", "adjunto")
+            b64 = adj.get("datos_base64") or adj.get("data_base64", "")
+            if not b64:
+                continue
+            # Corregir padding de base64 si es necesario
+            padding = 4 - len(b64) % 4
+            if padding != 4:
+                b64 += "=" * padding
+            try:
+                file_bytes = base64.b64decode(b64)
+                raw_files.append((nombre, file_bytes))
+            except Exception as e:
+                logger.warning(f"No se pudo decodificar base64 para '{nombre}': {e}")
+
+        logger.info(f"process-email (formato n8n) id={email_id!r} subject={subject!r} adjuntos={len(raw_files)}")
+
+    elif email_id:
+        # Formato directo con UploadFile
+        if attachments:
+            raw_files = [(f.filename, await f.read()) for f in attachments]
+        logger.info(f"process-email (formato directo) id={email_id!r} subject={subject!r} adjuntos={len(raw_files)}")
+
+    else:
+        raise HTTPException(422, "Se requiere 'email_data' (n8n) o 'email_id' (directo)")
 
     attachment_paths: list[str] = []
     total_received = 0
     total_successful = 0
 
-    if attachments:
-        raw_files = [(f.filename, await f.read()) for f in attachments]
-
+    if raw_files:
         result = process_attachments(
             raw_files,
             body,
@@ -181,7 +227,7 @@ async def process_email(
         total_successful = len(attachment_paths)
         log_attachment_processing(email_id, total_received, total_successful, attachment_paths)
 
-    # Extract inline images from HTML body
+    # Extraer imágenes inline del cuerpo HTML
     inline_images = extract_inline_images_from_html(body_html, email_id)
     if inline_images:
         log_inline_images(email_id, inline_images)
