@@ -12,7 +12,8 @@ import litellm
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from tenacity import retry, stop_after_attempt, wait_exponential
 import uvicorn
 
 from agent_llm import extract_passwords_from_text
@@ -612,24 +613,9 @@ RAMOS VÁLIDOS: Vida, GMM, Autos, PYME, Daños, Siniestros
 TIPOS DE TRÁMITE: nueva_poliza, renovacion, endoso, siniestro,
 reembolso, cotizacion, cancelacion, reclamacion
 
-Responde SOLO con JSON válido, sin markdown, sin explicaciones.
-Para cada campo incluye confidence (0-100) basado en qué tan
-explícito es el dato en el correo. Si un dato no aparece en el
-correo, usa null con confidence 0.
-
-IMPORTANTE: Tu respuesta debe ser únicamente el JSON, sin ningún
-texto antes ni después, sin bloques de código markdown.
-
-Estructura exacta requerida:
-{
-  "resumen": "string 2-3 oraciones del caso",
-  "tipo_tramite":     { "valor": "siniestro",  "confidence": 92 },
-  "ramo":             { "valor": "GMM",        "confidence": 88 },
-  "numero_poliza":    { "valor": "12345678",   "confidence": 95 },
-  "nombre_asegurado": { "valor": "Juan García","confidence": 70 },
-  "agente_cua":       { "valor": "A123456",    "confidence": 60 },
-  "monto":            { "valor": 15000,        "confidence": 45 }
-}"""
+Para cada campo extraído añade su respectivo `confidence` (0-100) basado en qué tan explícito es el dato en el correo.
+Si un dato no aparece en el correo, retorna null con confidence 0.
+"""
 
 _CONFIDENCE_WEIGHTS = {
     "tipo_tramite":     0.30,
@@ -714,6 +700,23 @@ def _dedup_check(
     return False, None
 
 
+class CampoString(BaseModel):
+    valor: Optional[str] = Field(None)
+    confidence: int = Field(0)
+
+class CampoFloat(BaseModel):
+    valor: Optional[float] = Field(None)
+    confidence: int = Field(0)
+
+class ExtraccionInicial(BaseModel):
+    resumen: str = Field(description="2-3 oraciones del caso")
+    tipo_tramite: CampoString
+    ramo: CampoString
+    numero_poliza: CampoString
+    nombre_asegurado: CampoString
+    agente_cua: CampoString
+    monto: CampoFloat
+
 class ComprensionRequest(BaseModel):
     email_id: str
     remitente_email: str = ""
@@ -727,7 +730,6 @@ async def agente_comprension(data: ComprensionRequest):
     Agente 1 — Comprensión de email con LiteLLM.
     Extrae campos estructurados, calcula confianza y detecta duplicados.
     Actualiza tramites_pipeline con status='comprendido'.
-    Reemplaza los nodos RunPod del workflow n8n.
     """
     llm_model = os.environ.get("LLM_MODEL", "openai/gpt-4o")
     logger.info(f"comprension email_id={data.email_id!r} model={llm_model!r}")
@@ -750,79 +752,33 @@ async def agente_comprension(data: ComprensionRequest):
         {"role": "user",   "content": data.cuerpo_texto or "(sin cuerpo)"},
     ]
 
-    try:
-        llm_resp = await litellm.acompletion(
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+    async def _call_llm():
+        return await litellm.acompletion(
             model=llm_model,
-            response_format={"type": "json_object"},
+            response_format=ExtraccionInicial,
             messages=messages,
             timeout=30,
         )
-        raw_content = llm_resp.choices[0].message.content or ""
+
+    try:
+        llm_resp = await _call_llm()
+        raw_content = llm_resp.choices[0].message.content or "{}"
         response_model = getattr(llm_resp, "model", None) or llm_model
-
-    except litellm.exceptions.AuthenticationError as exc:
-        logger.error(f"comprension AuthenticationError: {exc}")
-        await _mark_error(f"AuthenticationError: {exc}")
-        raise HTTPException(status_code=401, detail=f"LLM credential inválida: {exc}")
-
-    except litellm.exceptions.RateLimitError as exc:
-        logger.warning(f"comprension RateLimitError, reintentando en 5s: {exc}")
-        await asyncio.sleep(5)
-        try:
-            llm_resp = await litellm.acompletion(
-                model=llm_model,
-                response_format={"type": "json_object"},
-                messages=messages,
-                timeout=30,
-            )
-            raw_content = llm_resp.choices[0].message.content or ""
-            response_model = getattr(llm_resp, "model", None) or llm_model
-        except Exception as retry_exc:
-            await _mark_error(f"RateLimitError (retry): {retry_exc}")
-            raise HTTPException(status_code=429, detail=str(retry_exc))
-
-    except litellm.exceptions.BadRequestError as exc:
-        logger.error(f"comprension BadRequestError: {exc}")
-        await _mark_error(f"BadRequestError: {exc}")
-        raise HTTPException(status_code=400, detail=f"LLM bad request: {exc}")
-
-    except litellm.exceptions.ServiceUnavailableError as exc:
-        logger.error(f"comprension ServiceUnavailableError: {exc}")
-        await _mark_error(f"ServiceUnavailableError: {exc}")
-        raise HTTPException(status_code=503, detail=f"LLM no disponible: {exc}")
-
+        parsed_pydantic = ExtraccionInicial.model_validate_json(raw_content)
     except Exception as exc:
-        logger.error(f"comprension unexpected LLM error: {exc}")
+        logger.error(f"comprension error: {exc}")
         await _mark_error(str(exc))
         raise HTTPException(status_code=500, detail=str(exc))
 
-    # ── 2. Parsear JSON ───────────────────────────────────────────────────────
-    try:
-        parsed = json.loads(raw_content.strip())
-    except json.JSONDecodeError:
-        logger.error(f"comprension JSONDecodeError raw={raw_content[:300]!r}")
-        await _mark_error(f"JSONDecodeError: {raw_content[:200]}")
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "error": "LLM no devolvió JSON válido",
-                "raw_content": raw_content[:500],
-            },
-        )
-
-    def _f(key: str) -> tuple:
-        obj = parsed.get(key)
-        if isinstance(obj, dict):
-            return obj.get("valor"), int(obj.get("confidence") or 0)
-        return obj, 0
-
-    resumen                    = parsed.get("resumen") or ""
-    tipo_val,  tipo_conf       = _f("tipo_tramite")
-    ramo_val,  ramo_conf       = _f("ramo")
-    poliza_val, poliza_conf    = _f("numero_poliza")
-    aseg_val,  aseg_conf       = _f("nombre_asegurado")
-    cua_val,   cua_conf        = _f("agente_cua")
-    monto_val, monto_conf      = _f("monto")
+    # ── 2. Parsear Pydantic ───────────────────────────────────────────────────────
+    resumen                    = parsed_pydantic.resumen
+    tipo_val,  tipo_conf       = parsed_pydantic.tipo_tramite.valor, parsed_pydantic.tipo_tramite.confidence
+    ramo_val,  ramo_conf       = parsed_pydantic.ramo.valor, parsed_pydantic.ramo.confidence
+    poliza_val, poliza_conf    = parsed_pydantic.numero_poliza.valor, parsed_pydantic.numero_poliza.confidence
+    aseg_val,  aseg_conf       = parsed_pydantic.nombre_asegurado.valor, parsed_pydantic.nombre_asegurado.confidence
+    cua_val,   cua_conf        = parsed_pydantic.agente_cua.valor, parsed_pydantic.agente_cua.confidence
+    monto_val, monto_conf      = parsed_pydantic.monto.valor, parsed_pydantic.monto.confidence
 
     campos_confianza = {
         "tipo_tramite":     tipo_conf,

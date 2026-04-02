@@ -32,7 +32,13 @@ import httpx
 import litellm
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+class MatchAgente(BaseModel):
+    company_id: Optional[str] = Field(None, description="uuid si supera 85% de similitud, o null")
+    company_name: Optional[str] = Field(None, description="string o null")
+    confidence: int = Field(0, description="0-100")
 
 from supabase_client import supabase as _sb
 
@@ -145,38 +151,39 @@ def _add_business_days(start: date, days: int) -> date:
 
 # ── GraphQL helper ─────────────────────────────────────────────────────────────
 
-async def _gql(query: str, variables: dict | None = None, retry: bool = True) -> dict:
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+async def _do_request_gql(payload: dict) -> dict:
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.post(
+            f"{TWENTY_API_URL}/graphql",
+            json=payload,
+            headers=_TWENTY_HEADERS,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+async def _gql(query: str, variables: dict | None = None, retry_flag: bool = True) -> dict:
     """
     Execute a GraphQL query/mutation against Twenty /graphql endpoint.
-    Retries once on network error or 5xx.
+    Uses Tenacity for exponential backoff retries.
     Raises ValueError on GraphQL errors[], HTTPException on network failure.
     """
     payload: dict = {"query": query}
     if variables:
         payload["variables"] = variables
 
-    async def _do_request() -> dict:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                f"{TWENTY_API_URL}/graphql",
-                json=payload,
-                headers=_TWENTY_HEADERS,
-            )
-            resp.raise_for_status()
-            return resp.json()
-
     try:
-        body = await _do_request()
-    except (httpx.HTTPStatusError, httpx.RequestError) as exc:
-        if retry:
-            logger.warning(f"Twenty GQL error (retrying): {exc}")
-            await asyncio.sleep(5)
-            try:
-                body = await _do_request()
-            except Exception as exc2:
-                raise HTTPException(503, f"Twenty API no disponible: {exc2}") from exc2
+        if retry_flag:
+            body = await _do_request_gql(payload)
         else:
-            raise HTTPException(503, f"Twenty API no disponible: {exc}") from exc
+            # Try only once manually if requested
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(f"{TWENTY_API_URL}/graphql", json=payload, headers=_TWENTY_HEADERS)
+                resp.raise_for_status()
+                body = resp.json()
+    except Exception as exc:
+        logger.warning(f"Twenty API failed after retries: {exc}")
+        raise HTTPException(503, f"Twenty API no disponible: {exc}") from exc
 
     if "errors" in body and body["errors"]:
         # Log full error for debugging
@@ -308,23 +315,43 @@ async def _buscar_agente_por_cua(cua: str) -> str | None:
 async def _buscar_agente_fuzzy(nombre: str) -> str | None:
     """
     Try 3: Fuzzy name match via LLM.
-    Fetches up to 50 companies, asks LLM to find best match.
+    Pre-filters Fifty companies using ILIKE to avoid missing candidates via hard limit.
+    Then asks LLM to find best match via Pydantic structured output.
     Returns company_id if confidence >= 85, else None.
     """
     if not nombre:
         return None
 
+    # Attempt to grab the first word to do a broad match
+    fragmento = nombre.strip().split()[0]
+
     try:
+        # Buscamos primero con filtro ilike del primer nombre, y bajamos 150 para asegurar cobertura
         data = await _gql(
             """
-            {
-              companies(first: 50, filter: { deletedAt: { is: NULL } }) {
+            query FindFuzzyCompanies($like: String!) {
+              companies(first: 150, filter: { deletedAt: { is: NULL }, name: { ilike: $like } }) {
                 edges { node { id name } }
               }
             }
-            """
+            """,
+            {"like": f"%{fragmento}%"}
         )
         edges = data.get("companies", {}).get("edges", [])
+
+        # Fallback if the ILIKE was too strict (e.g. they misspelled the first word)
+        if not edges:
+            data = await _gql(
+                """
+                {
+                  companies(first: 150, filter: { deletedAt: { is: NULL } }) {
+                    edges { node { id name } }
+                  }
+                }
+                """
+            )
+            edges = data.get("companies", {}).get("edges", [])
+        
         if not edges:
             return None
 
@@ -337,27 +364,25 @@ async def _buscar_agente_fuzzy(nombre: str) -> str | None:
 
         prompt = (
             f"De esta lista de agentes: {lista_str}\n\n"
-            f"¿Cuál coincide mejor con el nombre '{nombre}'?\n\n"
-            "Responde SOLO con JSON válido (sin markdown):\n"
-            '{ "company_id": "uuid o null", "company_name": "string o null", "confidence": 0-100 }\n'
-            "Si ninguno supera 85% de similitud, usa null en company_id."
+            f"¿Cuál coincide mejor probabilísticamente con el nombre '{nombre}'?\n"
+            "Si ninguno parece ser la misma persona o supera 85% de similitud, indica null en company_id."
         )
 
         llm_resp = await litellm.acompletion(
             model=LLM_MODEL,
-            response_format={"type": "json_object"},
+            response_format=MatchAgente,
             messages=[{"role": "user", "content": prompt}],
             timeout=20,
         )
         raw = llm_resp.choices[0].message.content or "{}"
-        result = json.loads(raw.strip())
+        result = MatchAgente.model_validate_json(raw)
 
-        if result.get("confidence", 0) >= 85 and result.get("company_id"):
+        if result.confidence >= 85 and result.company_id:
             logger.info(
-                f"Agente encontrado via fuzzy LLM: {result.get('company_name')!r} "
-                f"confidence={result['confidence']}"
+                f"Agente encontrado via fuzzy LLM: {result.company_name!r} "
+                f"confidence={result.confidence}"
             )
-            return result["company_id"]
+            return result.company_id
     except Exception as exc:
         logger.warning(f"Fuzzy agent search failed: {exc}")
 

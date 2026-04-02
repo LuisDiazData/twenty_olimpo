@@ -6,6 +6,8 @@ from io import BytesIO
 from pathlib import Path
 from litellm import completion
 from dotenv import load_dotenv
+from pydantic import BaseModel, Field
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 load_dotenv(dotenv_path=Path(__file__).parent.parent.parent / ".env")
 
@@ -78,6 +80,33 @@ def ocr_con_runpod(contenido_bytes: bytes, mime_type: str) -> str:
 
 # ── Password extraction ────────────────────────────────────────────────────────
 
+class PasswordExtraction(BaseModel):
+    passwords: list[str] = Field(description="Lista de posibles contraseñas detectadas")
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+def _call_llm_for_passwords(prompt: str) -> list[str]:
+    response = completion(
+        model=MODEL_NAME,
+        messages=[{"role": "user", "content": prompt}],
+        api_key=os.getenv("LLM_API_KEY", "dummy"),
+        response_format=PasswordExtraction
+    )
+    # Depending on model, the content might be a stringified JSON or structured implicitly.
+    # LiteLLM parses response_format to structured output for supportive models (GPT-4o).
+    content = response.choices[0].message.content
+    try:
+        parsed = PasswordExtraction.model_validate_json(content)
+        return parsed.passwords
+    except Exception:
+        # Fallback manual
+        c_clean = content.strip()
+        if "```json" in c_clean:
+            c_clean = c_clean.split("```json")[1].split("```")[0]
+        elif "```" in c_clean:
+            c_clean = c_clean.split("```")[1].split("```")[0]
+        parsed_dict = json.loads(c_clean)
+        return parsed_dict.get("passwords", [])
+
 def extract_passwords_from_text(email_body: str) -> list[str]:
     """
     Uses litellm to read the email body and extract any potential passwords 
@@ -85,6 +114,9 @@ def extract_passwords_from_text(email_body: str) -> list[str]:
     """
     if not email_body or len(email_body.strip()) < 5:
         return []
+
+    # Truncate to save context
+    safe_body = email_body[:10000]
 
     prompt = f"""
 Eres un asistente experto en seguridad y extracción de datos.
@@ -98,34 +130,10 @@ A menudo las contraseñas pueden ser:
 - Nombres propios o fechas si se sugieren.
 
 Texto del correo:
-{email_body[:3000]}
-
-Tu única salida debe ser un JSON válido que contenga un array de strings con las posibles contraseñas. NO devuelvas ningún otro texto, explicaciones ni validaciones. 
-Si no encuentras ninguna, devuelve un array vacío [].
-Ejemplo de salida de éxito: ["MIPassword123", "XAXX010101000", "POLIZA987"]
+{safe_body}
 """
     try:
-        response = completion(
-            model=MODEL_NAME,
-            messages=[{"role": "user", "content": prompt}],
-            api_key=os.getenv("LLM_API_KEY", "dummy"), # depends on provider
-            # If using RunPod, api_base is required if runpod expects a specific path, but Litellm handles 'runpod/' natively
-        )
-        
-        content = response.choices[0].message.content
-        
-        # Parse output looking for JSON array
-        # Sometime LLMs wrap in ```json [...] ```
-        if "```json" in content:
-            content = content.split("```json")[1].split("```")[0]
-        elif "```" in content:
-            content = content.split("```")[1].split("```")[0]
-            
-        passwords = json.loads(content.strip())
-        if isinstance(passwords, list):
-            return [str(p) for p in passwords]
-        return []
-        
+        return _call_llm_for_passwords(prompt)
     except Exception as e:
         print(f"Error extracting passwords using LLM: {e}")
         return []

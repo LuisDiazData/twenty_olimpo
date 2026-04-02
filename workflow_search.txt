@@ -1,0 +1,7 @@
+C:\Users\wichi\twenty_olimpo\node_modules\twenty-front\src\generated\workflowVersion-payloads-v1.16.json
+C:\Users\wichi\twenty_olimpo\node_modules\twenty-front\src\generated\workflowVersion-payloads-v1.17.json
+C:\Users\wichi\twenty_olimpo\packages\twenty-front\src\generated\workflowVersion-payloads-v1.16.json
+C:\Users\wichi\twenty_olimpo\packages\twenty-front\src\generated\workflowVersion-payloads-v1.17.json
+C:\Users\wichi\twenty_olimpo\scripts\n8n\workflow-gmail-tramite-v2.json
+C:\Users\wichi\twenty_olimpo\scripts\n8n\workflow-gmail-tramite-v3.json
+C:\Users\wichi\twenty_olimpo\scripts\n8n\workflow-gmail-tramite.json

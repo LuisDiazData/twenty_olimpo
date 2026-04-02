@@ -1,0 +1,20 @@
+URL: https://aczkvxveenycpnwyqqbs.supabase.co
+Bucket setting: tramites-docs
+
+--- TABLE CHECK ---
+Table 'incoming_emails' -> EXISTS
+Table 'email_attachments' -> EXISTS
+Table 'dedup_index' -> EXISTS
+Table 'ocr_results' -> EXISTS
+Table 'ai_processing_log' -> EXISTS
+Table 'contact_email_map' -> EXISTS
+Table 'procedure_requirements' -> EXISTS
+Table 'analyst_metrics_log' -> EXISTS
+Table 'tramites_pipeline' -> EXISTS
+Table 'cobertura_analistas' -> EXISTS
+Table 'historial_asignaciones' -> EXISTS
+Table 'pipeline_logs' -> EXISTS
+Table 'attachments_log' -> EXISTS
+
+--- BUCKET CHECK ---
+Bucket 'tramites-docs' -> DOES NOT EXIST. Found: ['olimpo', 'incoming-raw', 'tramite-docs', 'ocr-output']

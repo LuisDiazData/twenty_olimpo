@@ -25,7 +25,8 @@ import httpx
 import litellm
 import requests as _requests
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from agent_llm import ocr_con_runpod
 from supabase_client import supabase as _sb
@@ -66,27 +67,7 @@ Comprobante de pago, CFDI/Factura, Acta de nacimiento,
 Solicitud de seguro, Carta instrucción, Pasaporte,
 Carnet de salud, Estado de cuenta, Otro
 
-Responde SOLO con JSON válido sin markdown. Schema exacto:
-{
-  "tipo_documento": "string (uno de los tipos válidos)",
-  "confidence": 0-100,
-  "datos_extraidos": {
-    "nombre_titular":   "string o null",
-    "numero_poliza":    "string o null",
-    "agente_cua":       "string o null",
-    "rfc":              "string o null",
-    "curp":             "string o null",
-    "fecha_emision":    "string o null",
-    "fecha_vencimiento":"string o null",
-    "monto":            "number o null",
-    "numero_folio":     "string o null",
-    "nombre_asegurado": "string o null",
-    "ramo":             "string o null"
-  },
-  "resumen_documento": "string de 1 oración describiendo el documento"
-}
-
-Extrae SOLO datos que estén explícitamente en el texto.
+Extrae SOLO datos que estén explícitamente en el texto asegurando la estructura JSON requerida.
 Si un dato no aparece, usa null. No inventes información."""
 
 # Cache de campos del objeto Documento en Twenty (cargado una vez por proceso)
@@ -99,11 +80,30 @@ class DocumentosRequest(BaseModel):
     tramite_id: str
     documento_ids: list[str] = []
 
+class DatosExtraidos(BaseModel):
+    nombre_titular: Optional[str] = Field(None)
+    numero_poliza: Optional[str] = Field(None)
+    agente_cua: Optional[str] = Field(None)
+    rfc: Optional[str] = Field(None)
+    curp: Optional[str] = Field(None)
+    fecha_emision: Optional[str] = Field(None)
+    fecha_vencimiento: Optional[str] = Field(None)
+    monto: Optional[float] = Field(None)
+    numero_folio: Optional[str] = Field(None)
+    nombre_asegurado: Optional[str] = Field(None)
+    ramo: Optional[str] = Field(None)
+
+class ClasificacionDocumento(BaseModel):
+    tipo_documento: str = Field(description="Uno de los tipos válidos (ej. INE/IFE, Póliza GNP, etc)")
+    confidence: int = Field(description="Nivel de confianza en la clasificación (0-100)")
+    datos_extraidos: DatosExtraidos
+    resumen_documento: str = Field(description="Breve descripción de una oración sobre el documento")
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-def _truncate_texto(texto: str, max_chars: int = 4000) -> str:
-    """Keep first 2000 + last 2000 chars for long documents."""
+def _truncate_texto(texto: str, max_chars: int = 15000) -> str:
+    """Keep first half + last half chars for long documents."""
     if len(texto) <= max_chars:
         return texto
     half = max_chars // 2
@@ -345,7 +345,6 @@ async def _clasificar_documento(texto: str) -> dict:
     """
     Send extracted text to LiteLLM for classification.
     Returns parsed JSON dict with tipo_documento, datos_extraidos, etc.
-    Retries once on RateLimitError.
     """
     llm_model = os.environ.get("LLM_MODEL", "openai/gpt-4o")
     texto_truncado = _truncate_texto(texto)
@@ -354,10 +353,11 @@ async def _clasificar_documento(texto: str) -> dict:
         {"role": "user", "content": f"Texto del documento:\n\n{texto_truncado}"},
     ]
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     async def _call() -> str:
         resp = await litellm.acompletion(
             model=llm_model,
-            response_format={"type": "json_object"},
+            response_format=ClasificacionDocumento,
             messages=messages,
             timeout=30,
         )
@@ -365,12 +365,17 @@ async def _clasificar_documento(texto: str) -> dict:
 
     try:
         raw = await _call()
-    except litellm.exceptions.RateLimitError:
-        logger.warning("clasificar_documento: RateLimitError, reintentando en 5s")
-        await asyncio.sleep(5)
-        raw = await _call()
-
-    return json.loads(raw.strip())
+        parsed = ClasificacionDocumento.model_validate_json(raw)
+        return parsed.model_dump()
+    except Exception as exc:
+        logger.warning(f"clasificar_documento final error after retries: {exc}")
+        # Fallback dictionary if all parsing fails
+        return {
+            "tipo_documento": "Otro",
+            "confidence": 0,
+            "datos_extraidos": {},
+            "resumen_documento": "Error de clasificación."
+        }
 
 
 # ── Core processing pipeline ───────────────────────────────────────────────────

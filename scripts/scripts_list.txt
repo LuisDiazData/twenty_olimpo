@@ -1,0 +1,7 @@
+C:\Users\wichi\twenty_olimpo\scripts\check_supabase.py
+C:\Users\wichi\twenty_olimpo\scripts\attachment_processor\agente_asignacion.py
+C:\Users\wichi\twenty_olimpo\scripts\attachment_processor\agente_documentos.py
+C:\Users\wichi\twenty_olimpo\scripts\attachment_processor\agent_llm.py
+C:\Users\wichi\twenty_olimpo\scripts\attachment_processor\extractor.py
+C:\Users\wichi\twenty_olimpo\scripts\attachment_processor\main.py
+C:\Users\wichi\twenty_olimpo\scripts\attachment_processor\supabase_client.py
