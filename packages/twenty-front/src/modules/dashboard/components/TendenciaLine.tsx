@@ -32,9 +32,9 @@ export const TendenciaLine = ({ tramites, meses = 6 }: TendenciaLineProps) => {
     const label = format(monthStart, 'MMM yy');
 
     const cerrados = tramites.filter((t) => {
-      if (!ESTADOS_FINALES.includes(t.estadoTramite ?? '')) return false;
-      if (!t.fechaEntrada || !t.fechaLimiteSla) return false;
-      const entrada = parseISO(t.fechaEntrada);
+      if (!ESTADOS_FINALES.includes(t.estatus ?? '')) return false;
+      if (!t.fechaIngreso || !t.fechaLimiteSla) return false;
+      const entrada = parseISO(t.fechaIngreso);
       return entrada >= monthStart && entrada < monthEnd;
     });
 
@@ -44,7 +44,7 @@ export const TendenciaLine = ({ tramites, meses = 6 }: TendenciaLineProps) => {
       cerrados.reduce((sum, t) => {
         const dias = differenceInDays(
           parseISO(t.fechaLimiteSla!),
-          parseISO(t.fechaEntrada!),
+          parseISO(t.fechaIngreso!),
         );
         return sum + Math.max(0, dias);
       }, 0) / cerrados.length;

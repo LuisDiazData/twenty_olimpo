@@ -90,15 +90,15 @@ export const BarrasIngresoVsCierre = ({
     const label = format(monthStart, 'MMM');
 
     const ingresados = tramites.filter((t) => {
-      if (!t.fechaEntrada) return false;
-      const d = parseISO(t.fechaEntrada);
+      if (!t.fechaIngreso) return false;
+      const d = parseISO(t.fechaIngreso);
       return d >= monthStart && d < monthEnd;
     }).length;
 
     const cerrados = tramites.filter((t) => {
-      if (!ESTADOS_FINALES.includes(t.estadoTramite ?? '')) return false;
-      if (!t.fechaEntrada) return false;
-      const d = parseISO(t.fechaEntrada);
+      if (!ESTADOS_FINALES.includes(t.estatus ?? '')) return false;
+      if (!t.fechaIngreso) return false;
+      const d = parseISO(t.fechaIngreso);
       return d >= monthStart && d < monthEnd;
     }).length;
 

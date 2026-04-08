@@ -6,14 +6,20 @@ import { AlertBar } from '../components/AlertBar';
 import { BarrasIngresoVsCierre } from '../components/BarrasIngresoVsCierre';
 import { CargaBar } from '../components/CargaBar';
 import { DonaRamo } from '../components/DonaRamo';
+import { FunnelChart } from '../components/FunnelChart';
 import { KPICard } from '../components/KPICard';
+import { ProductividadRamoChart } from '../components/ProductividadRamoChart';
+import { RankingAgentes } from '../components/RankingAgentes';
 import { RechazosChart } from '../components/RechazosChart';
+
 import { SemaforoTable } from '../components/SemaforoTable';
 import { TendenciaLine } from '../components/TendenciaLine';
 import { TramiteDetailPanel } from '../components/TramiteDetailPanel';
 import { RAMOS } from '../constants/colors';
 import type { DashboardData, Tramite } from '../types/dashboard.types';
 import { ESTADOS_FINALES, getSemaforo } from '../utils/semaforo';
+
+// ─── Styled components ────────────────────────────────────────────────────────
 
 const StyledContent = styled.div`
   flex: 1;
@@ -84,6 +90,8 @@ const StyledSlaTr = styled.tr`
   }
 `;
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
 const startOfMonth = (offset = 0) => {
   const d = new Date();
   d.setDate(1);
@@ -95,89 +103,96 @@ const startOfMonth = (offset = 0) => {
 const calcTrend = (curr: number, prev: number, lowerIsBetter = false) => {
   if (curr === prev) return { dir: 'igual' as const, label: '= vs mes ant.' };
   if (curr > prev) {
-    return {
-      dir: 'sube' as const,
-      label: `+${curr - prev} vs mes ant.`,
-    };
+    return { dir: 'sube' as const, label: `+${curr - prev} vs mes ant.` };
   }
-  return {
-    dir: 'baja' as const,
-    label: `-${prev - curr} vs mes ant.`,
-  };
+  return { dir: 'baja' as const, label: `-${prev - curr} vs mes ant.` };
 };
+
+const formatMXN = (val: number) =>
+  new Intl.NumberFormat('es-MX', {
+    style: 'currency',
+    currency: 'MXN',
+    maximumFractionDigits: 0,
+  }).format(val);
+
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export const DirectoraView = ({
   tramites,
-  razones,
+  motivosRechazo,
   members,
+  kpiSnapshots,
+  agentPerformance,
+  agentes,
+  filters,
 }: DashboardData) => {
   const [detalle, setDetalle] = useState<Tramite | null>(null);
 
   const now = startOfMonth(0);
   const prevMonth = startOfMonth(-1);
-  const nextMonth = startOfMonth(1);
 
+  // ── Métricas básicas ──────────────────────────────────────────────────────
   const activos = tramites.filter(
-    (t) => !ESTADOS_FINALES.includes(t.estadoTramite ?? ''),
+    (t) => !ESTADOS_FINALES.includes(t.estatus ?? ''),
   );
   const thisMes = tramites.filter(
-    (t) => isDefined(t.fechaEntrada) && parseISO(t.fechaEntrada) >= now,
+    (t) => isDefined(t.fechaIngreso) && parseISO(t.fechaIngreso) >= now,
   );
   const lastMes = tramites.filter(
     (t) =>
-      isDefined(t.fechaEntrada) &&
-      parseISO(t.fechaEntrada) >= prevMonth &&
-      parseISO(t.fechaEntrada) < now,
+      isDefined(t.fechaIngreso) &&
+      parseISO(t.fechaIngreso) >= prevMonth &&
+      parseISO(t.fechaIngreso) < now,
   );
   const cerradosMes = tramites.filter(
     (t) =>
-      ESTADOS_FINALES.includes(t.estadoTramite ?? '') &&
-      t.fechaEntrada &&
-      parseISO(t.fechaEntrada) >= now,
+      ESTADOS_FINALES.includes(t.estatus ?? '') &&
+      t.fechaIngreso &&
+      parseISO(t.fechaIngreso) >= now,
   );
   const cerradosPrev = tramites.filter(
     (t) =>
-      ESTADOS_FINALES.includes(t.estadoTramite ?? '') &&
-      isDefined(t.fechaEntrada) &&
-      parseISO(t.fechaEntrada) >= prevMonth &&
-      parseISO(t.fechaEntrada) < now,
+      ESTADOS_FINALES.includes(t.estatus ?? '') &&
+      isDefined(t.fechaIngreso) &&
+      parseISO(t.fechaIngreso) >= prevMonth &&
+      parseISO(t.fechaIngreso) < now,
   );
+  // "Cancelado" equivale a rechazado/no resuelto en el flujo de la promotoría
   const rechazadosMes = tramites.filter(
     (t) =>
-      t.resultadoGnp === 'RECHAZADO' &&
-      t.fechaEntrada &&
-      parseISO(t.fechaEntrada) >= now,
+      t.estatus === 'CANCELADO' &&
+      t.fechaIngreso &&
+      parseISO(t.fechaIngreso) >= now,
   );
   const rechazadosPrev = tramites.filter(
     (t) =>
-      t.resultadoGnp === 'RECHAZADO' &&
-      isDefined(t.fechaEntrada) &&
-      parseISO(t.fechaEntrada) >= prevMonth &&
-      parseISO(t.fechaEntrada) < now,
+      t.estatus === 'CANCELADO' &&
+      isDefined(t.fechaIngreso) &&
+      parseISO(t.fechaIngreso) >= prevMonth &&
+      parseISO(t.fechaIngreso) < now,
   );
-
   const activosPrev = tramites.filter(
     (t) =>
-      !ESTADOS_FINALES.includes(t.estadoTramite ?? '') &&
-      isDefined(t.fechaEntrada) &&
-      parseISO(t.fechaEntrada) >= prevMonth &&
-      parseISO(t.fechaEntrada) < now,
+      !ESTADOS_FINALES.includes(t.estatus ?? '') &&
+      isDefined(t.fechaIngreso) &&
+      parseISO(t.fechaIngreso) >= prevMonth &&
+      parseISO(t.fechaIngreso) < now,
   );
 
   const trendActivos = calcTrend(activos.length, activosPrev.length);
   const trendIngreso = calcTrend(thisMes.length, lastMes.length);
   const trendCerrados = calcTrend(cerradosMes.length, cerradosPrev.length);
-  const trendRechazados = calcTrend(
-    rechazadosMes.length,
-    rechazadosPrev.length,
-    true,
-  );
+  const trendRechazados = calcTrend(rechazadosMes.length, rechazadosPrev.length, true);
 
-  // SLA por ramo table
+  // ── SLA por ramo table (existente) ────────────────────────────────────────
+  const slaVencidosTotal = activos.filter(
+    (t) => getSemaforo(t.fechaLimiteSla, t.estatus) === 'rojo',
+  ).length;
+
   const slaRamo = RAMOS.map((ramo) => {
     const act = activos.filter((t) => t.ramo === ramo);
     const venc = act.filter(
-      (t) => getSemaforo(t.fechaLimiteSla, t.estadoTramite) === 'rojo',
+      (t) => getSemaforo(t.fechaLimiteSla, t.estatus) === 'rojo',
     ).length;
     return {
       ramo,
@@ -190,10 +205,58 @@ export const DirectoraView = ({
   const slaColor = (v: number): 'verde' | 'amarillo' | 'rojo' =>
     v === 0 ? 'verde' : v <= 3 ? 'amarillo' : 'rojo';
 
+  // ── Nuevas métricas estratégicas ──────────────────────────────────────────
+
+  // SLA Global %
+  const slaGlobalKpi = kpiSnapshots.find(
+    (k) => k.metricaNombre === 'SLA_Compliance_Global',
+  );
+  const slaGlobalVal = slaGlobalKpi?.valor
+    ?? (activos.length
+      ? Math.round(((activos.length - slaVencidosTotal) / activos.length) * 100)
+      : 100);
+  const slaGlobalColor =
+    slaGlobalVal >= 95 ? 'verde' : slaGlobalVal >= 85 ? 'amarillo' : 'rojo';
+
+  // Prima Emitida Total
+  const primaTotal = agentPerformance.reduce(
+    (s, a) => s + (a.primaEmitida ?? 0),
+    0,
+  );
+
+  // First Pass Yield %
+  const fpyKpi = kpiSnapshots.find((k) => k.metricaNombre === 'First_Pass_Yield');
+  const fpyVal = fpyKpi?.valor
+    ?? (cerradosMes.length
+      ? Math.round(
+          ((cerradosMes.length - rechazadosMes.length) / cerradosMes.length) *
+            100,
+        )
+      : 100);
+  const fpyColor = fpyVal >= 80 ? 'verde' : fpyVal >= 60 ? 'amarillo' : 'rojo';
+
+  // Alertas de Cédula (vencen en 60 días)
+  const hoy = new Date();
+  const limite60 = new Date(hoy.getTime() + 60 * 24 * 60 * 60 * 1000);
+  const alertasCedula = agentes.filter((a) => {
+    if (!a.fechaVencimientoCedula) return false;
+    const vence = parseISO(a.fechaVencimientoCedula);
+    return vence <= limite60;
+  }).length;
+
+  const periodLabel =
+    filters.periodo === 'mes'
+      ? 'Este mes'
+      : filters.periodo === 'trimestre'
+        ? 'Último trimestre'
+        : 'Este año';
+
   return (
     <>
       <AlertBar tramites={tramites} />
       <StyledContent>
+
+        {/* ── KPI Row 1: Métricas operativas ────────────────────────────── */}
         <StyledKPIRow>
           <KPICard
             label="Trámites activos"
@@ -223,6 +286,35 @@ export const DirectoraView = ({
           />
         </StyledKPIRow>
 
+        {/* ── KPI Row 2: Métricas estratégicas ──────────────────────────── */}
+        <StyledKPIRow>
+          <KPICard
+            label="SLA Global"
+            value={`${slaGlobalVal}%`}
+            sublabel="Meta: 95%"
+            color={slaGlobalColor}
+          />
+          <KPICard
+            label="Prima Emitida"
+            value={primaTotal > 0 ? formatMXN(primaTotal) : '—'}
+            sublabel={periodLabel}
+            color="azul"
+          />
+          <KPICard
+            label="First Pass Yield"
+            value={`${fpyVal}%`}
+            sublabel="Sin rechazo en 1er intento"
+            color={fpyColor}
+          />
+          <KPICard
+            label="Alertas de Cédula"
+            value={alertasCedula}
+            sublabel="Vencen en 60 días"
+            color={alertasCedula > 0 ? 'rojo' : 'verde'}
+          />
+        </StyledKPIRow>
+
+        {/* ── Row 3: Dona + Barras + SLA por ramo ──────────────────────── */}
         <StyledRow>
           <StyledCard style={{ width: '27%' }}>
             <StyledCardTitle>Activos por ramo</StyledCardTitle>
@@ -252,10 +344,7 @@ export const DirectoraView = ({
                 </thead>
                 <tbody>
                   {slaRamo.map((r) => (
-                    <StyledSlaTr
-                      key={r.ramo}
-                      data-color={slaColor(r.vencidos)}
-                    >
+                    <StyledSlaTr key={r.ramo} data-color={slaColor(r.vencidos)}>
                       <StyledSlaTd>{r.ramo}</StyledSlaTd>
                       <StyledSlaTd>{r.activos}</StyledSlaTd>
                       <StyledSlaTd>{r.vencidos}</StyledSlaTd>
@@ -268,10 +357,24 @@ export const DirectoraView = ({
           </StyledCard>
         </StyledRow>
 
+        {/* ── Row 4: Embudo operacional + Productividad por ramo ────────── */}
+        <StyledRow>
+          <StyledCard style={{ flex: '0 0 44%' }}>
+            <StyledCardTitle>Embudo de Operación</StyledCardTitle>
+            <FunnelChart tramites={tramites} />
+          </StyledCard>
+
+          <StyledCard style={{ flex: 1 }}>
+            <StyledCardTitle>Productividad por Ramo</StyledCardTitle>
+            <ProductividadRamoChart tramites={tramites} />
+          </StyledCard>
+        </StyledRow>
+
+        {/* ── Row 5: Rechazos + Tendencia resolución ────────────────────── */}
         <StyledRow>
           <StyledCard style={{ width: '40%' }}>
             <StyledCardTitle>Top razones de rechazo GNP</StyledCardTitle>
-            <RechazosChart razonesRechazo={razones} />
+            <RechazosChart razonesRechazo={motivosRechazo} />
           </StyledCard>
 
           <StyledCard style={{ flex: 1 }}>
@@ -282,27 +385,38 @@ export const DirectoraView = ({
           </StyledCard>
         </StyledRow>
 
+        {/* ── Row 6: Ranking agentes + Semáforo urgentes ────────────────── */}
         <StyledRow>
+          <StyledCard style={{ flex: '0 0 40%' }}>
+            <StyledCardTitle>Top 5 Agentes — {periodLabel}</StyledCardTitle>
+            <RankingAgentes
+              agentPerformance={agentPerformance}
+              kpiSnapshots={kpiSnapshots}
+              tramites={tramites}
+            />
+          </StyledCard>
+
           <StyledCard style={{ flex: 1 }}>
             <StyledCardTitle>Trámites urgentes (vencidos + próximos)</StyledCardTitle>
             <SemaforoTable
               tramites={activos.filter((t) =>
                 ['rojo', 'amarillo'].includes(
-                  getSemaforo(t.fechaLimiteSla, t.estadoTramite),
+                  getSemaforo(t.fechaLimiteSla, t.estatus),
                 ),
               )}
               columns={[
                 'folio',
-                'agenteTitular',
+                'agente',
                 'ramo',
-                'estadoTramite',
-                'especialistaAsignado',
+                'estatus',
+                'analistaAsignado',
                 'fechaLimiteSla',
               ]}
               onRowClick={setDetalle}
             />
           </StyledCard>
         </StyledRow>
+
       </StyledContent>
 
       <TramiteDetailPanel tramite={detalle} onClose={() => setDetalle(null)} />

@@ -14,30 +14,42 @@ export const RAMO_COLORS: Record<string, string> = {
   VIDA: '#1D9E75',
   GMM: '#378ADD',
   AUTOS: '#BA7517',
-  PYME: '#D85A30',
+  PYMES: '#D85A30',
   DANOS: '#7F77DD',
 };
 
+// Mapeo estatus reales del schema de Twenty → etiqueta legible
 export const ESTADO_LABEL: Record<string, string> = {
-  PENDIENTE: 'Pendiente',
-  EN_REVISION: 'En revisión',
-  LISTO_PARA_GNP: 'Listo para GNP',
-  ENVIADO_A_GNP: 'Enviado a GNP',
-  APROBADO_GNP: 'Aprobado GNP',
-  RECHAZADO_GNP: 'Rechazado GNP',
-  CERRADO: 'Cerrado',
+  RECIBIDO: 'Recibido',
+  EN_REVISION_DOC: 'En revisión',
+  DOCUMENTACION_COMPLETA: 'Doc. completa',
+  TURNADO_GNP: 'Turnado GNP',
+  EN_PROCESO_GNP: 'En proceso GNP',
+  DETENIDO: 'Detenido',
+  RESUELTO: 'Resuelto',
+  CANCELADO: 'Cancelado',
+};
+
+export const ESTADO_COLORS: Record<string, { bg: string; color: string }> = {
+  RECIBIDO: { bg: 'rgba(156,154,146,.15)', color: '#9c9a92' },
+  EN_REVISION_DOC: { bg: 'rgba(24,95,165,.2)', color: '#5fa8e8' },
+  DOCUMENTACION_COMPLETA: { bg: 'rgba(186,117,23,.2)', color: '#e6a020' },
+  TURNADO_GNP: { bg: 'rgba(24,95,165,.2)', color: '#5fa8e8' },
+  EN_PROCESO_GNP: { bg: 'rgba(24,95,165,.15)', color: '#378add' },
+  DETENIDO: { bg: 'rgba(163,45,45,.2)', color: '#e05252' },
+  RESUELTO: { bg: 'rgba(29,158,117,.2)', color: '#22c78a' },
+  CANCELADO: { bg: 'rgba(156,154,146,.15)', color: '#9c9a92' },
 };
 
 export const TIPO_LABEL: Record<string, string> = {
-  NUEVA_POLIZA: 'Nueva póliza',
+  EMISION: 'Emisión',
   ENDOSO: 'Endoso',
   RENOVACION: 'Renovación',
   CANCELACION: 'Cancelación',
   SINIESTRO: 'Siniestro',
-  COTIZACION_PYME: 'Cotización PYME',
 };
 
-export const RAMOS = ['VIDA', 'GMM', 'AUTOS', 'PYME', 'DANOS'] as const;
+export const RAMOS = ['VIDA', 'GMM', 'AUTOS', 'PYMES', 'DANOS'] as const;
 
 export const NIVO_THEME = {
   background: '#1a1d27',

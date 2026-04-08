@@ -53,25 +53,25 @@ interface AlertBarProps {
 
 export const AlertBar = ({ tramites }: AlertBarProps) => {
   const activos = tramites.filter(
-    (t) => !ESTADOS_FINALES.includes(t.estadoTramite ?? ''),
+    (t) => !ESTADOS_FINALES.includes(t.estatus ?? ''),
   );
 
   const vencidos = activos.filter(
-    (t) => getSemaforo(t.fechaLimiteSla, t.estadoTramite) === 'rojo',
+    (t) => getSemaforo(t.fechaLimiteSla, t.estatus) === 'rojo',
   ).length;
 
   const proximos = activos.filter(
-    (t) => getSemaforo(t.fechaLimiteSla, t.estadoTramite) === 'amarillo',
+    (t) => getSemaforo(t.fechaLimiteSla, t.estatus) === 'amarillo',
   ).length;
 
-  // SLA promedio: avg of (fechaLimiteSla - fechaEntrada) for closed this month
+  // SLA promedio: avg of (fechaLimiteSla - fechaIngreso) for closed this month
   const now = new Date();
   const startMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const cerradosMes = tramites.filter(
     (t) =>
-      ESTADOS_FINALES.includes(t.estadoTramite ?? '') &&
-      isDefined(t.fechaEntrada) &&
-      parseISO(t.fechaEntrada) >= startMonth &&
+      ESTADOS_FINALES.includes(t.estatus ?? '') &&
+      isDefined(t.fechaIngreso) &&
+      parseISO(t.fechaIngreso) >= startMonth &&
       isDefined(t.fechaLimiteSla),
   );
 
@@ -80,7 +80,7 @@ export const AlertBar = ({ tramites }: AlertBarProps) => {
     const totalDias = cerradosMes.reduce((sum, t) => {
       const dias = differenceInDays(
         parseISO(t.fechaLimiteSla!),
-        parseISO(t.fechaEntrada!),
+        parseISO(t.fechaIngreso!),
       );
       return sum + Math.max(0, dias);
     }, 0);

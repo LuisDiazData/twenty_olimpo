@@ -23,13 +23,15 @@ from typing import Optional
 
 import httpx
 import litellm
+import pikepdf
 import requests as _requests
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from agent_llm import ocr_con_runpod
-from supabase_client import supabase as _sb
+from supabase_client import supabase as _sb, get_tipo_documento_map
+import twenty_sync
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +58,12 @@ TIPOS_DOCUMENTO = [
     "Estado de cuenta",
     "Otro",
 ]
+
+# Mapeo de motivo de rechazo según legibilidad/tipo de error
+_MOTIVO_POR_LEGIBILIDAD: dict[str, str] = {
+    "ILEGIBLE":   "ILEGIBLE",
+    "ERROR_OCR":  "OCR_ERROR",
+}
 
 _CLASIFICACION_SYSTEM_PROMPT = """\
 Eres un experto en documentación para seguros mexicanos en una promotoría GNP.
@@ -123,13 +131,16 @@ def _extract_pdf_text(contenido_bytes: bytes) -> str:
     return "\n".join(partes).strip()
 
 
+_DOC_SELECT = "id, nombre, storage_path, mime_type, twenty_documento_id, tramite_id, was_encrypted"
+
+
 def _get_pending_documentos(tramite_id: str) -> list[dict]:
     """Fetch all unclassified attachment records for a tramite."""
     if not _sb:
         return []
     resp = (
         _sb.table("attachments_log")
-        .select("id, nombre, storage_path, mime_type")
+        .select(_DOC_SELECT)
         .eq("tramite_id", tramite_id)
         .eq("clasificacion_completada", False)
         .execute()
@@ -143,7 +154,7 @@ def _get_documento_by_id(doc_id: str) -> dict | None:
         return None
     resp = (
         _sb.table("attachments_log")
-        .select("id, nombre, storage_path, mime_type, twenty_documento_id")
+        .select(_DOC_SELECT)
         .eq("id", doc_id)
         .limit(1)
         .execute()
@@ -163,6 +174,28 @@ def _mark_error(doc_id: str, error_msg: str) -> None:
         }).eq("id", doc_id).execute()
     except Exception as exc:
         logger.warning(f"Could not mark error for doc {doc_id}: {exc}")
+
+
+async def _mark_error_twenty(
+    doc_id: str,
+    twenty_doc_id: str | None,
+    tramite_id: str,
+    error_msg: str,
+) -> None:
+    """Mark error in Supabase AND update Twenty CRM (best-effort)."""
+    await asyncio.to_thread(_mark_error, doc_id, error_msg)
+    if twenty_doc_id:
+        await twenty_sync.actualizar_estatus_procesamiento(
+            twenty_doc_id, "ERROR", notas=error_msg[:500]
+        )
+        await twenty_sync.registrar_historial_estatus(
+            entidad_tipo="documentoAdjunto",
+            entidad_id=twenty_doc_id,
+            estatus_anterior="EN_PROCESO",
+            estatus_nuevo="ERROR",
+            tramite_id=tramite_id or None,
+            motivo_cambio=error_msg[:500],
+        )
 
 
 def _save_resultado(
@@ -187,156 +220,7 @@ def _save_resultado(
     }).eq("id", doc_id).execute()
 
 
-# ── Twenty CRM helpers ─────────────────────────────────────────────────────────
-
-async def _get_twenty_documento_fields() -> set[str]:
-    """
-    Introspect Twenty Metadata API to get valid field names for the
-    'documento' object. Cached after first call.
-    """
-    global _twenty_documento_fields
-    if _twenty_documento_fields is not None:
-        return _twenty_documento_fields
-
-    if not TWENTY_API_KEY:
-        _twenty_documento_fields = set()
-        return _twenty_documento_fields
-
-    introspect_query = """
-    query GetDocumentoFields {
-      objects(filter: { nameSingular: { eq: "documento" } }) {
-        edges {
-          node {
-            nameSingular
-            fields {
-              edges {
-                node {
-                  name
-                  type
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-    """
-    headers = {
-        "Authorization": f"Bearer {TWENTY_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                f"{TWENTY_API_URL}/metadata",
-                json={"query": introspect_query},
-                headers=headers,
-            )
-            resp.raise_for_status()
-            body = resp.json()
-
-        edges = (
-            body.get("data", {})
-            .get("objects", {})
-            .get("edges", [])
-        )
-        if not edges:
-            logger.warning("Twenty: objeto 'documento' no encontrado en metadata")
-            _twenty_documento_fields = set()
-            return _twenty_documento_fields
-
-        field_edges = (
-            edges[0].get("node", {})
-            .get("fields", {})
-            .get("edges", [])
-        )
-        _twenty_documento_fields = {
-            e["node"]["name"]
-            for e in field_edges
-            if e.get("node", {}).get("name")
-        }
-        logger.info(f"Twenty documento fields: {_twenty_documento_fields}")
-    except Exception as exc:
-        logger.warning(f"Twenty metadata introspection failed: {exc}")
-        _twenty_documento_fields = set()
-
-    return _twenty_documento_fields
-
-
-async def _update_twenty_documento(
-    twenty_documento_id: str,
-    tipo_documento: str,
-    datos_extraidos: dict,
-    resumen_documento: str,
-) -> bool:
-    """
-    Update a Documento object in Twenty CRM if the fields exist.
-    Only updates fields confirmed via metadata introspection.
-    """
-    if not TWENTY_API_KEY or not twenty_documento_id:
-        return False
-
-    valid_fields = await _get_twenty_documento_fields()
-    if not valid_fields:
-        logger.warning("Skipping Twenty update — no valid documento fields found")
-        return False
-
-    # Build update data only with fields that exist in Twenty
-    update_data: dict = {}
-    field_map = {
-        "tipoDocumento":     tipo_documento,
-        "nombreTitular":     (datos_extraidos or {}).get("nombre_titular"),
-        "numeroPoliza":      (datos_extraidos or {}).get("numero_poliza"),
-        "resumenDocumento":  resumen_documento,
-    }
-    for field_name, value in field_map.items():
-        if field_name in valid_fields and value is not None:
-            update_data[field_name] = value
-
-    if not update_data:
-        logger.info(
-            f"Twenty documento {twenty_documento_id}: no matching fields to update"
-        )
-        return False
-
-    # Build dynamic mutation with only the fields we know exist
-    fields_str = " ".join(update_data.keys())
-    mutation = f"""
-    mutation UpdateDocumento($id: ID!, $data: DocumentoUpdateInput!) {{
-      updateDocumento(id: $id, data: $data) {{
-        id
-        {fields_str}
-      }}
-    }}
-    """
-    headers = {
-        "Authorization": f"Bearer {TWENTY_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                f"{TWENTY_API_URL}/api",
-                json={"query": mutation, "variables": {
-                    "id": twenty_documento_id,
-                    "data": update_data,
-                }},
-                headers=headers,
-            )
-            resp.raise_for_status()
-            body = resp.json()
-            if body.get("errors"):
-                logger.warning(
-                    f"Twenty updateDocumento errors: {body['errors']}"
-                )
-                return False
-        logger.info(
-            f"Twenty documento {twenty_documento_id} actualizado: {list(update_data.keys())}"
-        )
-        return True
-    except Exception as exc:
-        logger.warning(f"Twenty updateDocumento failed: {exc}")
-        return False
+# (funciones _get_twenty_documento_fields y _update_twenty_documento reemplazadas por twenty_sync)
 
 
 # ── LLM classification ─────────────────────────────────────────────────────────
@@ -385,11 +269,26 @@ async def _procesar_documento(doc: dict) -> dict:
     Full pipeline for one document. Returns a result dict.
     Raises on unrecoverable errors — caller handles per-doc try/except.
     """
-    doc_id       = doc["id"]
-    nombre       = doc.get("nombre", "")
-    storage_path = doc.get("storage_path", "")
-    mime_type    = (doc.get("mime_type") or "application/octet-stream").lower()
+    doc_id        = doc["id"]
+    nombre        = doc.get("nombre", "")
+    storage_path  = doc.get("storage_path", "")
+    mime_type     = (doc.get("mime_type") or "application/octet-stream").lower()
     twenty_doc_id = doc.get("twenty_documento_id")
+    tramite_id    = doc.get("tramite_id") or ""
+    was_encrypted = doc.get("was_encrypted", False)
+
+    # — Marcar EN_PROCESO en Twenty
+    if twenty_doc_id:
+        await twenty_sync.actualizar_estatus_procesamiento(twenty_doc_id, "EN_PROCESO")
+        await twenty_sync.registrar_historial_estatus(
+            entidad_tipo="documentoAdjunto",
+            entidad_id=twenty_doc_id,
+            estatus_anterior="PENDIENTE",
+            estatus_nuevo="EN_PROCESO",
+            tramite_id=tramite_id or None,
+            motivo_cambio="Inicio de extracción y clasificación IA",
+        )
+    inicio_proceso = time.monotonic()
 
     # 1. Download from Supabase Storage
     contenido_bytes: bytes = _sb.storage.from_(BUCKET_NAME).download(storage_path)
@@ -404,6 +303,12 @@ async def _procesar_documento(doc: dict) -> dict:
         # Try embedded text first
         try:
             texto_pdf = await asyncio.to_thread(_extract_pdf_text, contenido_bytes)
+        except pikepdf.PasswordError:
+            # PDF still encrypted (extractor didn't have the password)
+            logger.warning(f"PDF encriptado sin contraseña disponible: {nombre}")
+            if twenty_doc_id:
+                await twenty_sync.actualizar_encriptacion(twenty_doc_id, "CON_PASSWORD")
+            texto_pdf = ""
         except Exception as exc:
             logger.warning(f"pdfplumber error en {nombre}: {exc}")
             texto_pdf = ""
@@ -442,6 +347,7 @@ async def _procesar_documento(doc: dict) -> dict:
     clasificacion = await _clasificar_documento(texto_extraido)
 
     tipo_documento    = clasificacion.get("tipo_documento", "Otro")
+    confidence        = clasificacion.get("confidence", 0)
     datos_extraidos   = clasificacion.get("datos_extraidos", {})
     resumen_documento = clasificacion.get("resumen_documento", "")
 
@@ -451,23 +357,64 @@ async def _procesar_documento(doc: dict) -> dict:
         doc_id, tipo_documento, texto_extraido, datos_extraidos, metodo_extraccion,
     )
 
-    # 5. Update Twenty CRM if twenty_documento_id is set
+    # 5. Sincronizar con Twenty CRM
     if twenty_doc_id:
-        await _update_twenty_documento(
-            twenty_doc_id, tipo_documento, datos_extraidos, resumen_documento
+        # Obtener clave del catálogo desde Supabase (administrable)
+        tipo_map = await asyncio.to_thread(get_tipo_documento_map)
+        tipo_clave = tipo_map.get(tipo_documento, "OTRO")
+
+        # Calcular legibilidad
+        legibilidad, puntuacion = twenty_sync.calcular_legibilidad(
+            texto_extraido, confidence, metodo_extraccion
+        )
+
+        # Determinar motivo de rechazo si aplica
+        motivo_clave = None
+        if legibilidad in _MOTIVO_POR_LEGIBILIDAD:
+            motivo_clave = _MOTIVO_POR_LEGIBILIDAD[legibilidad]
+        elif was_encrypted and not texto_extraido.strip():
+            motivo_clave = "ENCRIPTADO"
+
+        await twenty_sync.actualizar_con_resultado_ia(
+            documento_id=twenty_doc_id,
+            tipo_documento_clave=tipo_clave,
+            texto_extraido=texto_extraido,
+            legibilidad=legibilidad,
+            puntuacion_legibilidad=puntuacion,
+            metadatos_ia={
+                "confidence":     confidence,
+                "metodo":         metodo_extraccion,
+                "datos_extraidos": datos_extraidos,
+                "resumen":        resumen_documento,
+            },
+            motivo_rechazo_clave=motivo_clave,
+            confidence=confidence,
+        )
+
+        tiempo_min = int((time.monotonic() - inicio_proceso) / 60)
+        estatus_final = "REQUIERE_REVISION" if confidence < 60 or tipo_clave == "OTRO" else "PROCESADO"
+        await twenty_sync.registrar_historial_estatus(
+            entidad_tipo="documentoAdjunto",
+            entidad_id=twenty_doc_id,
+            estatus_anterior="EN_PROCESO",
+            estatus_nuevo=estatus_final,
+            tramite_id=tramite_id or None,
+            motivo_cambio=f"Clasificación IA: {tipo_documento} (confianza {confidence}%)",
+            tiempo_transcurrido_minutos=tiempo_min,
+            metadatos={"legibilidad": legibilidad, "metodo": metodo_extraccion},
         )
     else:
         logger.info(
             f"Doc {doc_id} ({nombre}): sin twenty_documento_id — "
-            "Twenty se actualizará cuando el Agente 4 cree el trámite"
+            "se sincronizará cuando el Agente 4 vincule el trámite"
         )
 
     return {
-        "documento_id":           doc_id,
-        "nombre":                 nombre,
-        "tipo_documento":         tipo_documento,
-        "metodo_extraccion":      metodo_extraccion,
-        "datos_extraidos":        datos_extraidos,
+        "documento_id":             doc_id,
+        "nombre":                   nombre,
+        "tipo_documento":           tipo_documento,
+        "metodo_extraccion":        metodo_extraccion,
+        "datos_extraidos":          datos_extraidos,
         "clasificacion_completada": True,
     }
 
@@ -530,13 +477,17 @@ async def agente_documentos(data: DocumentosRequest):
             # Known unsupported formats or empty files — mark and continue
             msg = str(exc)
             logger.warning(f"Doc {doc_id} ({nombre}) ValueError: {msg}")
-            await asyncio.to_thread(_mark_error, doc_id, msg)
+            twenty_doc_id = doc.get("twenty_documento_id")
+            tramite_id = doc.get("tramite_id", "")
+            await _mark_error_twenty(doc_id, twenty_doc_id, tramite_id, msg)
             errores.append({"documento_id": doc_id, "nombre": nombre, "error": msg})
 
         except Exception as exc:
             msg = str(exc)
             logger.error(f"Doc {doc_id} ({nombre}) error: {msg}", exc_info=True)
-            await asyncio.to_thread(_mark_error, doc_id, msg)
+            twenty_doc_id = doc.get("twenty_documento_id")
+            tramite_id = doc.get("tramite_id", "")
+            await _mark_error_twenty(doc_id, twenty_doc_id, tramite_id, msg)
             errores.append({"documento_id": doc_id, "nombre": nombre, "error": msg})
 
     return {

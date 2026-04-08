@@ -1,0 +1,785 @@
+{
+  "name": "promotoria-gmail-ingestion-v4",
+  "nodes": [
+    {
+      "id": "a1b2c3d4-0001-0001-0001-000000000001",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        440
+      ],
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "filters": {
+          "readStatus": "unread",
+          "labelIds": []
+        },
+        "options": {
+          "attachmentsPrefix": "attachment_",
+          "downloadAttachments": true
+        }
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "PENDIENTE_CONFIGURAR",
+          "name": "Gmail OAuth2"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0002-0002-0002-000000000002",
+      "name": "Extraer Headers Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        440
+      ],
+      "parameters": {
+        "jsCode": "const email = $input.first().json;\n\n// Limpiar angle-brackets de message IDs\nconst cleanId = (id) => (id || '').replace(/[<>\\s]/g, '');\n\nconst rawMessageId = email.messageId\n  || (email.headers && (email.headers['message-id'] || email.headers['Message-ID']))\n  || email.id\n  || '';\n\nconst rawInReplyTo = email.inReplyTo\n  || (email.headers && (email.headers['in-reply-to'] || email.headers['In-Reply-To']))\n  || '';\n\nconst rawReferences = email.references\n  || (email.headers && (email.headers['references'] || email.headers['References']))\n  || '';\n\nconst messageId = cleanId(rawMessageId) || (email.id || '');\nconst inReplyTo = cleanId(rawInReplyTo);\nconst threadId = email.threadId || inReplyTo || messageId;\n\n// Extraer lista de referencias\nconst referencesList = rawReferences\n  ? rawReferences.split(/\\s+/).map(r => cleanId(r)).filter(Boolean)\n  : [];\n\n// from puede ser string o objeto\nconst fromObj = email.from || {};\nconst fromEmail = (fromObj.value && fromObj.value[0] && fromObj.value[0].address)\n  || (typeof fromObj === 'string' ? fromObj : '')\n  || '';\nconst fromName = (fromObj.value && fromObj.value[0] && fromObj.value[0].name) || fromEmail;\n\n// to puede ser array u objeto\nconst toObj = email.to || {};\nconst toEmail = (toObj.value && toObj.value[0] && toObj.value[0].address)\n  || (Array.isArray(toObj) ? toObj[0] : '')\n  || '';\n\nconst attachmentsCount = (email.attachments || []).length;\n\nreturn [{\n  json: {\n    ...email,\n    _parsed: {\n      messageId,\n      inReplyTo,\n      threadId,\n      references: referencesList,\n      fromEmail,\n      fromName,\n      toEmail,\n      subject: email.subject || '',\n      bodyText: email.text || '',\n      bodyHtml: email.html || '',\n      receivedAt: email.date || new Date().toISOString(),\n      hasAttachments: attachmentsCount > 0,\n      attachmentCount: attachmentsCount\n    }\n  }\n}];"
+      }
+    },
+    {
+      "id": "a1b2c3d4-0003-0003-0003-000000000003",
+      "name": "POST email/ingest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        440
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:4000/api/v1/email/ingest",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  message_id: $json._parsed.messageId,\n  thread_id: $json._parsed.threadId,\n  from_email: $json._parsed.fromEmail,\n  from_name: $json._parsed.fromName,\n  to: [$json._parsed.toEmail],\n  subject: $json._parsed.subject,\n  body_text: $json._parsed.bodyText,\n  body_html: $json._parsed.bodyHtml,\n  received_at: $json._parsed.receivedAt,\n  in_reply_to: $json._parsed.inReplyTo,\n  references: $json._parsed.references,\n  has_attachments: $json._parsed.hasAttachments,\n  attachment_count: $json._parsed.attachmentCount,\n  canal_origen: 'CORREO'\n}) }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0004-0004-0004-000000000004",
+      "name": "Evaluar Respuesta Ingest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        940,
+        440
+      ],
+      "parameters": {
+        "jsCode": "const resp = $input.first().json;\nconst parsed = $('Extraer Headers Email').first().json._parsed;\n\nconst statusCode = resp.statusCode || 200;\nconst body = resp.body || resp;\n\n// Detectar error HTTP\nconst isHttpError = statusCode >= 400;\nconst errorMsg = isHttpError ? (body.detail || body.error || body.message || `HTTP ${statusCode}`) : null;\n\n// Extraer campos de la respuesta del endpoint\n// El endpoint devuelve: { tramite_id, strategy, requiere_accion, hilo_id, ... }\nconst tramiteId = body.tramite_id || null;\nconst strategy = body.strategy || null;  // 'reply_to_known', 'new_email', 'manual_queue', etc.\nconst requiereAccion = body.requiere_accion === true;\nconst hiloId = body.hilo_id || null;\nconst message = body.message || '';\n\n// Determinar si es un reply a tramite conocido:\n// tramite_id != null Y strategy != 'new_email' => hilo conocido\nconst esHiloConocido = (tramiteId !== null) && (strategy !== 'new_email') && (strategy !== null);\n\n// Es email nuevo si strategy == 'new_email' o no hay tramite_id\nconst esEmailNuevo = (strategy === 'new_email') || (tramiteId === null && !isHttpError);\n\n// Es manual_queue si strategy == 'manual_queue'\nconst esManualQueue = strategy === 'manual_queue';\n\nconsole.log(`email/ingest: status=${statusCode}, strategy=${strategy}, tramite_id=${tramiteId}, requiere_accion=${requiereAccion}`);\n\nreturn [{\n  json: {\n    // Datos del email originales\n    ...parsed,\n    // Resultado del ingest\n    ingest_status_code: statusCode,\n    ingest_error: errorMsg,\n    ingest_ok: !isHttpError,\n    tramite_id: tramiteId,\n    strategy,\n    requiere_accion: requiereAccion,\n    hilo_id: hiloId,\n    ingest_message: message,\n    // Flags de decisi\u00f3n\n    es_hilo_conocido: esHiloConocido,\n    es_email_nuevo: esEmailNuevo,\n    es_manual_queue: esManualQueue\n  }\n}];"
+      }
+    },
+    {
+      "id": "a1b2c3d4-0005-0005-0005-000000000005",
+      "name": "IF Hilo Conocido",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        440
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond-hilo-conocido",
+              "leftValue": "={{ $json.es_hilo_conocido }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0006-0006-0006-000000000006",
+      "name": "IF Requiere Accion Manual",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1420,
+        220
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond-requiere-accion",
+              "leftValue": "={{ $json.requiere_accion }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0007-0007-0007-000000000007",
+      "name": "Notificar Equipo Manual Queue",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [
+        1660,
+        100
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "operaciones@olimpo.com.mx",
+        "subject": "=[Olimpo] Hilo sin clasificar requiere revision manual \u2014 {{ $json.subject }}",
+        "emailType": "text",
+        "message": "=Un email reply requiere revision manual en el pipeline.\n\nDe: {{ $json.fromName }} <{{ $json.fromEmail }}>\nAsunto: {{ $json.subject }}\nFecha: {{ $json.receivedAt }}\nHilo ID: {{ $json.hilo_id }}\nMessage ID: {{ $json.messageId }}\nStrategy: {{ $json.strategy }}\nMensaje del sistema: {{ $json.ingest_message }}\n\nAccion requerida: Revisar y clasificar manualmente en Twenty CRM.",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "PENDIENTE_CONFIGURAR",
+          "name": "Gmail OAuth2"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0008-0008-0008-000000000008",
+      "name": "Fin Hilo Actualizado",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1660,
+        340
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "a1b2c3d4-0009-0009-0009-000000000009",
+      "name": "Supabase Crear Pipeline Record",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1420,
+        660
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://aczkvxveenycpnwyqqbs.supabase.co/rest/v1/tramites_pipeline",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFjemt2eHZlZW55Y3Bud3lxcWJzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NDc0NDA4MywiZXhwIjoyMDkwMzIwMDgzfQ.JaXERUjXTGF1hd0iZuwM_Y8_03pXog8f27p_63ae-2A"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFjemt2eHZlZW55Y3Bud3lxcWJzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NDc0NDA4MywiZXhwIjoyMDkwMzIwMDgzfQ.JaXERUjXTGF1hd0iZuwM_Y8_03pXog8f27p_63ae-2A"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  status: 'procesando',\n  correo_remitente: $json.fromEmail,\n  correo_asunto: $json.subject,\n  thread_id: $json.threadId,\n  message_id: $json.messageId,\n  canal_ingreso: 'Correo',\n  tiene_adjuntos: $json.hasAttachments,\n  fecha_ingreso: $json.receivedAt\n}) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0010-0010-0010-000000000010",
+      "name": "Preparar Datos Para FastAPI",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1660,
+        660
+      ],
+      "parameters": {
+        "jsCode": "const ingestData = $('Evaluar Respuesta Ingest').first().json;\nconst email = $('Gmail Trigger').first().json;\n\n// Extraer tramite_id del registro creado en Supabase\nconst supaResp = $input.first().json;\nconst supaBody = supaResp.body || supaResp;\nconst supaRecord = Array.isArray(supaBody) ? supaBody[0] : supaBody;\nconst tramitePipelineId = supaRecord?.id || ingestData.tramite_id || null;\n\n// Obtener binarios de Gmail (adjuntos)\nlet gmailBinary = {};\ntry { gmailBinary = $('Gmail Trigger').first().binary || {}; } catch(e) { gmailBinary = {}; }\n\nconst adjuntos = [];\nfor (const [key, binaryInfo] of Object.entries(gmailBinary)) {\n  if (binaryInfo && key.startsWith('attachment_')) {\n    let base64Data = '';\n    try {\n      base64Data = Buffer.isBuffer(binaryInfo.data)\n        ? binaryInfo.data.toString('base64')\n        : (typeof binaryInfo.data === 'string' ? binaryInfo.data : '');\n    } catch(e) { base64Data = ''; }\n    adjuntos.push({\n      campo: key,\n      nombre_archivo: binaryInfo.fileName || key,\n      tipo_mime: binaryInfo.mimeType || 'application/octet-stream',\n      tamano_bytes: binaryInfo.fileSize || 0,\n      datos_base64: base64Data\n    });\n  }\n}\n\nconst emailData = {\n  tramite_id: tramitePipelineId,\n  remitente: ingestData.fromEmail,\n  nombre_remitente: ingestData.fromName,\n  asunto: ingestData.subject,\n  cuerpo: ingestData.bodyText || '',\n  cuerpo_html: ingestData.bodyHtml || '',\n  fecha: ingestData.receivedAt,\n  message_id: ingestData.messageId,\n  thread_id: ingestData.threadId || email.threadId || '',\n  tiene_adjuntos: adjuntos.length > 0,\n  adjuntos_count: adjuntos.length,\n  adjuntos\n};\n\nreturn [{\n  json: {\n    tramite_pipeline_id: tramitePipelineId,\n    email_data: JSON.stringify(emailData),\n    _adjuntos_count: adjuntos.length,\n    // Pasar datos del email para uso posterior\n    fromEmail: ingestData.fromEmail,\n    fromName: ingestData.fromName,\n    subject: ingestData.subject,\n    bodyText: ingestData.bodyText\n  }\n}];"
+      }
+    },
+    {
+      "id": "a1b2c3d4-0011-0011-0011-000000000011",
+      "name": "POST process-email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1900,
+        660
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:4000/process-email",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "email_data",
+              "value": "={{ $json.email_data }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "id": "a1b2c3d4-0012-0012-0012-000000000012",
+      "name": "POST agentes/comprension",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2140,
+        660
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:4000/api/v1/agentes/comprension",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  email_id: $('Preparar Datos Para FastAPI').first().json.tramite_pipeline_id,\n  remitente_email: $('Preparar Datos Para FastAPI').first().json.fromEmail,\n  asunto: $('Preparar Datos Para FastAPI').first().json.subject,\n  cuerpo_texto: ($('Preparar Datos Para FastAPI').first().json.bodyText || '').substring(0, 4000)\n}) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "id": "a1b2c3d4-0013-0013-0013-000000000013",
+      "name": "Evaluar Agente 1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2380,
+        660
+      ],
+      "parameters": {
+        "jsCode": "const resp = $input.first().json;\nconst prepData = $('Preparar Datos Para FastAPI').first().json;\n\nconst statusCode = resp.statusCode || 200;\nconst body = resp.body || resp;\n\nconst errorDetectado = statusCode >= 400 || !!body.detail || !!body.error;\nconst errorMessage = errorDetectado\n  ? (body.detail || body.error || `HTTP ${statusCode}`)\n  : null;\n\nreturn [{\n  json: {\n    tramite_pipeline_id: prepData.tramite_pipeline_id,\n    fromEmail: prepData.fromEmail,\n    fromName: prepData.fromName,\n    subject: prepData.subject,\n    bodyText: prepData.bodyText,\n    error_detectado: errorDetectado,\n    error_message: errorMessage,\n    confianza_global: body.confianza_global || 0,\n    tipo_tramite: body.tipo_tramite || null,\n    ramo: body.ramo || null,\n    numero_poliza: body.numero_poliza || null,\n    nombre_asegurado: body.nombre_asegurado || null,\n    agente_cua: body.agente_cua || null,\n    resumen: body.resumen || '',\n    es_duplicado_posible: body.es_duplicado_posible || false,\n    tramite_duplicado_ref: body.tramite_duplicado_ref || null\n  }\n}];"
+      }
+    },
+    {
+      "id": "a1b2c3d4-0014-0014-0014-000000000014",
+      "name": "IF Error Agente 1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2620,
+        660
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond-err-a1",
+              "leftValue": "={{ $json.error_detectado }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0015-0015-0015-000000000015",
+      "name": "Error A1 Log Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2860,
+        500
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://aczkvxveenycpnwyqqbs.supabase.co/rest/v1/pipeline_logs",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "apikey",
+              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFjemt2eHZlZW55Y3Bud3lxcWJzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NDc0NDA4MywiZXhwIjoyMDkwMzIwMDgzfQ.JaXERUjXTGF1hd0iZuwM_Y8_03pXog8f27p_63ae-2A"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFjemt2eHZlZW55Y3Bud3lxcWJzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NDc0NDA4MywiZXhwIjoyMDkwMzIwMDgzfQ.JaXERUjXTGF1hd0iZuwM_Y8_03pXog8f27p_63ae-2A"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ tramite_id: $json.tramite_pipeline_id ?? null, etapa: 'agente1_comprension', error_message: $json.error_message, timestamp: new Date().toISOString() }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0016-0016-0016-000000000016",
+      "name": "Error A1 Notificar Equipo",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [
+        3100,
+        500
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "operaciones@olimpo.com.mx",
+        "subject": "=[Pipeline Error] Fallo agente comprension \u2014 {{ $json.subject }}",
+        "emailType": "text",
+        "message": "=Error en agente de comprension del pipeline.\n\nTramite Pipeline ID: {{ $json.tramite_pipeline_id }}\nEtapa: agente1_comprension\nError: {{ $json.error_message }}\nRemitente: {{ $json.fromEmail }}\nAsunto: {{ $json.subject }}",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "PENDIENTE_CONFIGURAR",
+          "name": "Gmail OAuth2"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0017-0017-0017-000000000017",
+      "name": "POST agentes/asignacion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2860,
+        820
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:4000/api/v1/agentes/asignacion",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  tramite_id: $json.tramite_pipeline_id,\n  ramo: $json.ramo,\n  tipo_tramite: $json.tipo_tramite,\n  agente_cua: $json.agente_cua,\n  confianza_global: $json.confianza_global\n}) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "id": "a1b2c3d4-0018-0018-0018-000000000018",
+      "name": "Evaluar Resultado Final",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3100,
+        820
+      ],
+      "parameters": {
+        "jsCode": "const resp = $input.first().json;\nconst a1data = $('Evaluar Agente 1').first().json;\n\nconst statusCode = resp.statusCode || 200;\nconst body = resp.body || resp;\n\nconst errorDetectado = statusCode >= 400 || !!body.detail;\nconst tramiteCreado = !errorDetectado && (body.twenty_tramite_id || body.tramite_created === true || body.folio);\nconst requiereRevision = body.requiere_revision === true || body.strategy === 'revision_manual' || (!tramiteCreado && !errorDetectado);\n\nconst folioGnp = body.folio || body.folio_gnp || null;\nconst twentyId = body.twenty_tramite_id || null;\n\nconsole.log(`asignacion: status=${statusCode}, tramite_creado=${tramiteCreado}, folio=${folioGnp}, twenty_id=${twentyId}`);\n\nreturn [{\n  json: {\n    tramite_pipeline_id: a1data.tramite_pipeline_id,\n    fromEmail: a1data.fromEmail,\n    fromName: a1data.fromName,\n    subject: a1data.subject,\n    ramo: a1data.ramo,\n    tipo_tramite: a1data.tipo_tramite,\n    error_detectado: errorDetectado,\n    tramite_creado: tramiteCreado,\n    requiere_revision: requiereRevision,\n    folio: folioGnp,\n    twenty_tramite_id: twentyId,\n    asignacion_status: statusCode\n  }\n}];"
+      }
+    },
+    {
+      "id": "a1b2c3d4-0019-0019-0019-000000000019",
+      "name": "IF Tramite Creado",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3340,
+        820
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cond-tramite-creado",
+              "leftValue": "={{ $json.tramite_creado }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0020-0020-0020-000000000020",
+      "name": "Acuse Tramite Creado",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [
+        3580,
+        700
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{ $json.fromEmail }}",
+        "subject": "=Re: {{ $json.subject }} \u2014 Tramite recibido en Olimpo (Folio: {{ $json.folio || 'Asignando...' }})",
+        "emailType": "text",
+        "message": "=Estimado/a {{ $json.fromName }},\n\nHemos recibido su solicitud y hemos creado un tramite en nuestro sistema.\n\nFolio: {{ $json.folio || 'Pendiente de asignacion' }}\nRamo: {{ $json.ramo || 'Por determinar' }}\nTipo: {{ $json.tipo_tramite || 'Por determinar' }}\n\nUn analista revisara la documentacion y se pondra en contacto con usted en caso de requerir informacion adicional.\n\nAtentamente,\nEquipo Olimpo Promotoria de Seguros",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "PENDIENTE_CONFIGURAR",
+          "name": "Gmail OAuth2"
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0021-0021-0021-000000000021",
+      "name": "Acuse En Revision",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [
+        3580,
+        940
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{ $json.fromEmail }}",
+        "subject": "=Re: {{ $json.subject }} \u2014 Su tramite esta en revision",
+        "emailType": "text",
+        "message": "=Estimado/a {{ $json.fromName }},\n\nHemos recibido su correo. Su solicitud esta siendo revisada por nuestro equipo.\n\nNos pondremos en contacto con usted a la brevedad para confirmar la recepcion de su tramite.\n\nAtentamente,\nEquipo Olimpo Promotoria de Seguros",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "PENDIENTE_CONFIGURAR",
+          "name": "Gmail OAuth2"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extraer Headers Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraer Headers Email": {
+      "main": [
+        [
+          {
+            "node": "POST email/ingest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST email/ingest": {
+      "main": [
+        [
+          {
+            "node": "Evaluar Respuesta Ingest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluar Respuesta Ingest": {
+      "main": [
+        [
+          {
+            "node": "IF Hilo Conocido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Hilo Conocido": {
+      "main": [
+        [
+          {
+            "node": "IF Requiere Accion Manual",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Supabase Crear Pipeline Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Requiere Accion Manual": {
+      "main": [
+        [
+          {
+            "node": "Notificar Equipo Manual Queue",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fin Hilo Actualizado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase Crear Pipeline Record": {
+      "main": [
+        [
+          {
+            "node": "Preparar Datos Para FastAPI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Datos Para FastAPI": {
+      "main": [
+        [
+          {
+            "node": "POST process-email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST process-email": {
+      "main": [
+        [
+          {
+            "node": "POST agentes/comprension",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST agentes/comprension": {
+      "main": [
+        [
+          {
+            "node": "Evaluar Agente 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluar Agente 1": {
+      "main": [
+        [
+          {
+            "node": "IF Error Agente 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Error Agente 1": {
+      "main": [
+        [
+          {
+            "node": "Error A1 Log Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "POST agentes/asignacion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error A1 Log Supabase": {
+      "main": [
+        [
+          {
+            "node": "Error A1 Notificar Equipo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST agentes/asignacion": {
+      "main": [
+        [
+          {
+            "node": "Evaluar Resultado Final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluar Resultado Final": {
+      "main": [
+        [
+          {
+            "node": "IF Tramite Creado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Tramite Creado": {
+      "main": [
+        [
+          {
+            "node": "Acuse Tramite Creado",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Acuse En Revision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "timezone": "America/Mexico_City"
+  }
+}

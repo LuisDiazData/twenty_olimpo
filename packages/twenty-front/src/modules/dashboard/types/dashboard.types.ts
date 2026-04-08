@@ -1,17 +1,19 @@
 export type SemaforoColor = 'verde' | 'amarillo' | 'rojo' | 'gris';
 
+// Estatus reales del objeto Tramite en Twenty CRM
 export type TramiteEstado =
-  | 'PENDIENTE'
-  | 'EN_REVISION'
-  | 'LISTO_PARA_GNP'
-  | 'ENVIADO_A_GNP'
-  | 'APROBADO_GNP'
-  | 'RECHAZADO_GNP'
-  | 'CERRADO';
+  | 'RECIBIDO'
+  | 'EN_REVISION_DOC'
+  | 'DOCUMENTACION_COMPLETA'
+  | 'TURNADO_GNP'
+  | 'EN_PROCESO_GNP'
+  | 'DETENIDO'
+  | 'RESUELTO'
+  | 'CANCELADO';
 
-export type TramiteRamo = 'VIDA' | 'GMM' | 'AUTOS' | 'PYME' | 'DANOS';
+export type TramiteRamo = 'VIDA' | 'GMM' | 'AUTOS' | 'PYMES' | 'DANOS';
 
-export interface AgenteTitular {
+export interface Agente {
   id: string;
   name: string;
 }
@@ -21,7 +23,7 @@ export interface MemberName {
   lastName: string;
 }
 
-export interface EspecialistaAsignado {
+export interface AnalistaAsignado {
   id: string;
   name: MemberName;
 }
@@ -29,28 +31,25 @@ export interface EspecialistaAsignado {
 export interface Tramite {
   id: string;
   name: string;
+  folio: string | null;
+  folioGnp: string | null;
   ramo: TramiteRamo | null;
-  estadoTramite: TramiteEstado | null;
-  fechaEntrada: string | null;
-  fechaLimiteSla: string | null;
-  resultadoGnp: string | null;
+  estatus: TramiteEstado | null;
   tipoTramite: string | null;
-  fueraDeSla: boolean | null;
-  notasAnalista: string | null;
-  folioInterno: string | null;
-  numPolizaGnp: string | null;
-  nombreAsegurado: string | null;
-  agenteTitular: AgenteTitular | null;
-  especialistaAsignado: EspecialistaAsignado | null;
+  prioridad: string | null;
+  fechaIngreso: string | null;
+  fechaLimiteSla: string | null;
+  fechaResolucion: string | null;
+  agente: Agente | null;
+  analistaAsignado: AnalistaAsignado | null;
 }
 
-export interface RazonRechazo {
+export interface MotivoRechazo {
   id: string;
   name: string;
-  categoria: string | null;
-  descripcion: string | null;
-  frecuencia: number | null;
-  tramite: { id: string; ramo: string | null } | null;
+  ramo: string | null;
+  tipoTramite: string | null;
+  activo: boolean | null;
 }
 
 export interface Member {
@@ -58,10 +57,55 @@ export interface Member {
   name: MemberName;
 }
 
+export type PeriodFilter = 'mes' | 'trimestre' | 'anio';
+
+export interface DashboardFilters {
+  periodo: PeriodFilter;
+  ramo: TramiteRamo | 'todos';
+  gerenteId: string | null;
+}
+
+export interface KpiSnapshot {
+  id: string;
+  metricaNombre: string | null;
+  granularidad: string | null;
+  entidadTipo: string | null;
+  valor: number | null;
+  meta: number | null;
+  metaAlcanzada: boolean | null;
+  unidad: string | null;
+  fechaCorte: string | null;
+}
+
+export interface AgentPerformance {
+  id: string;
+  mesAnio: string | null;
+  tramitesTotales: number | null;
+  tramitesResueltos: number | null;
+  firstPassYield: number | null;
+  primaEmitida: number | null;
+  tasaCumplimientoSla: number | null;
+  bonoProyectado: number | null;
+  agente: { id: string; name: string; claveAgente: string | null } | null;
+}
+
+export interface AgenteCompliance {
+  id: string;
+  name: string;
+  claveAgente: string | null;
+  fechaVencimientoCedula: string | null;
+  estatus: string | null;
+  gerenteDesarrollo: { id: string; name: MemberName } | null;
+}
+
 export interface DashboardData {
   tramites: Tramite[];
-  razones: RazonRechazo[];
+  motivosRechazo: MotivoRechazo[];
   members: Member[];
+  kpiSnapshots: KpiSnapshot[];
+  agentPerformance: AgentPerformance[];
+  agentes: AgenteCompliance[];
+  filters: DashboardFilters;
   isLoading: boolean;
   error: string | null;
   refetch: () => void;

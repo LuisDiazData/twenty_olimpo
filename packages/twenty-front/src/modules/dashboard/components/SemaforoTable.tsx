@@ -1,17 +1,17 @@
 import { styled } from '@linaria/react';
 import { format, parseISO } from 'date-fns';
-import { ESTADO_LABEL, RAMO_COLORS, TIPO_LABEL } from '../constants/colors';
+import { ESTADO_COLORS, ESTADO_LABEL, RAMO_COLORS, TIPO_LABEL } from '../constants/colors';
 import type { Tramite } from '../types/dashboard.types';
 import { SEMAFORO_HEX, SEMAFORO_LABEL, getSemaforo } from '../utils/semaforo';
 
 export type TableColumn =
   | 'folio'
-  | 'agenteTitular'
+  | 'agente'
   | 'tipoTramite'
   | 'ramo'
-  | 'estadoTramite'
+  | 'estatus'
   | 'fechaLimiteSla'
-  | 'especialistaAsignado';
+  | 'analistaAsignado';
 
 interface SemaforoTableProps {
   tramites: Tramite[];
@@ -21,12 +21,12 @@ interface SemaforoTableProps {
 
 const COLUMN_LABELS: Record<TableColumn, string> = {
   folio: 'Folio',
-  agenteTitular: 'Agente',
+  agente: 'Agente',
   tipoTramite: 'Tipo',
   ramo: 'Ramo',
-  estadoTramite: 'Estado',
+  estatus: 'Estatus',
   fechaLimiteSla: 'Límite SLA',
-  especialistaAsignado: 'Especialista',
+  analistaAsignado: 'Analista',
 };
 
 const StyledTable = styled.table`
@@ -101,42 +101,18 @@ const formatDate = (d: string | null) => {
   }
 };
 
-const estadoBg: Record<string, string> = {
-  PENDIENTE: 'rgba(156,154,146,.15)',
-  EN_REVISION: 'rgba(24,95,165,.2)',
-  LISTO_PARA_GNP: 'rgba(186,117,23,.2)',
-  ENVIADO_A_GNP: 'rgba(24,95,165,.2)',
-  APROBADO_GNP: 'rgba(29,158,117,.2)',
-  RECHAZADO_GNP: 'rgba(163,45,45,.2)',
-  CERRADO: 'rgba(156,154,146,.15)',
-};
-const estadoColor: Record<string, string> = {
-  PENDIENTE: '#9c9a92',
-  EN_REVISION: '#5fa8e8',
-  LISTO_PARA_GNP: '#e6a020',
-  ENVIADO_A_GNP: '#5fa8e8',
-  APROBADO_GNP: '#22c78a',
-  RECHAZADO_GNP: '#e05252',
-  CERRADO: '#9c9a92',
-};
-
 export const SemaforoTable = ({
   tramites,
   columns,
   onRowClick,
 }: SemaforoTableProps) => {
-  // Sort: rojo → amarillo → verde → gris
   const ORDER = { rojo: 0, amarillo: 1, verde: 2, gris: 3 };
   const sorted = [...tramites].sort((a, b) => {
-    const sa = getSemaforo(a.fechaLimiteSla, a.estadoTramite);
-    const sb = getSemaforo(b.fechaLimiteSla, b.estadoTramite);
+    const sa = getSemaforo(a.fechaLimiteSla, a.estatus);
+    const sb = getSemaforo(b.fechaLimiteSla, b.estatus);
     if (ORDER[sa] !== ORDER[sb]) return ORDER[sa] - ORDER[sb];
-    const da = a.fechaLimiteSla
-      ? new Date(a.fechaLimiteSla).getTime()
-      : Infinity;
-    const db = b.fechaLimiteSla
-      ? new Date(b.fechaLimiteSla).getTime()
-      : Infinity;
+    const da = a.fechaLimiteSla ? new Date(a.fechaLimiteSla).getTime() : Infinity;
+    const db = b.fechaLimiteSla ? new Date(b.fechaLimiteSla).getTime() : Infinity;
     return da - db;
   });
 
@@ -145,47 +121,35 @@ export const SemaforoTable = ({
       case 'folio':
         return (
           <span style={{ fontFamily: 'monospace', fontSize: 11 }}>
-            {tramite.folioInterno ?? tramite.name}
+            {tramite.folio ?? tramite.name}
           </span>
         );
-      case 'agenteTitular':
-        return tramite.agenteTitular?.name ?? '—';
+      case 'agente':
+        return tramite.agente?.name ?? '—';
       case 'tipoTramite':
-        return (
-          TIPO_LABEL[tramite.tipoTramite ?? ''] ?? tramite.tipoTramite ?? '—'
-        );
+        return TIPO_LABEL[tramite.tipoTramite ?? ''] ?? tramite.tipoTramite ?? '—';
       case 'ramo':
         return tramite.ramo ? (
           <>
-            <StyledRamoDot
-              style={{ backgroundColor: RAMO_COLORS[tramite.ramo] }}
-            />
+            <StyledRamoDot style={{ backgroundColor: RAMO_COLORS[tramite.ramo] }} />
             {tramite.ramo}
           </>
         ) : (
           '—'
         );
-      case 'estadoTramite': {
-        const est = tramite.estadoTramite ?? '';
+      case 'estatus': {
+        const est = tramite.estatus ?? '';
+        const style = ESTADO_COLORS[est] ?? { bg: 'rgba(156,154,146,.15)', color: '#9c9a92' };
         return (
-          <StyledBadge
-            style={{
-              background: estadoBg[est] ?? 'rgba(156,154,146,.15)',
-              color: estadoColor[est] ?? '#9c9a92',
-            }}
-          >
+          <StyledBadge style={{ background: style.bg, color: style.color }}>
             {ESTADO_LABEL[est] ?? est}
           </StyledBadge>
         );
       }
       case 'fechaLimiteSla':
-        return (
-          <span style={{ color: '#9c9a92', fontSize: 11 }}>
-            {formatDate(tramite.fechaLimiteSla)}
-          </span>
-        );
-      case 'especialistaAsignado':
-        return memberFullName(tramite.especialistaAsignado);
+        return <span style={{ color: '#9c9a92', fontSize: 11 }}>{formatDate(tramite.fechaLimiteSla)}</span>;
+      case 'analistaAsignado':
+        return memberFullName(tramite.analistaAsignado);
       default:
         return '—';
     }
@@ -193,9 +157,7 @@ export const SemaforoTable = ({
 
   if (sorted.length === 0) {
     return (
-      <div
-        style={{ color: '#9c9a92', textAlign: 'center', padding: '24px 0' }}
-      >
+      <div style={{ color: '#9c9a92', textAlign: 'center', padding: '24px 0' }}>
         Sin trámites
       </div>
     );
@@ -213,17 +175,13 @@ export const SemaforoTable = ({
       </thead>
       <tbody>
         {sorted.map((t) => {
-          const sem = getSemaforo(t.fechaLimiteSla, t.estadoTramite);
+          const sem = getSemaforo(t.fechaLimiteSla, t.estatus);
           return (
             <StyledTr key={t.id} onClick={() => onRowClick?.(t)}>
               {columns.map((col, idx) => (
                 <StyledTd
                   key={col}
-                  style={
-                    idx === 0
-                      ? { borderLeftColor: SEMAFORO_HEX[sem] }
-                      : undefined
-                  }
+                  style={idx === 0 ? { borderLeftColor: SEMAFORO_HEX[sem] } : undefined}
                 >
                   {renderCell(t, col)}
                 </StyledTd>
@@ -232,11 +190,9 @@ export const SemaforoTable = ({
                 <StyledBadge
                   style={{
                     background:
-                      sem === 'rojo'
-                        ? 'rgba(163,45,45,.25)'
-                        : sem === 'amarillo'
-                          ? 'rgba(186,117,23,.25)'
-                          : 'rgba(29,158,117,.2)',
+                      sem === 'rojo' ? 'rgba(163,45,45,.25)'
+                      : sem === 'amarillo' ? 'rgba(186,117,23,.25)'
+                      : 'rgba(29,158,117,.2)',
                     color: SEMAFORO_HEX[sem],
                   }}
                 >

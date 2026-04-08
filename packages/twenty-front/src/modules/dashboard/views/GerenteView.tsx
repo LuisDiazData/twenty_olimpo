@@ -138,7 +138,7 @@ const pctBadge = (pct: number) => {
 
 export const GerenteView = ({
   tramites,
-  razones,
+  motivosRechazo,
   members,
 }: DashboardData) => {
   const [ramo, setRamo] = useState<string>('VIDA');
@@ -146,39 +146,40 @@ export const GerenteView = ({
 
   const filtered = tramites.filter((t) => t.ramo === ramo);
   const activos = filtered.filter(
-    (t) => !ESTADOS_FINALES.includes(t.estadoTramite ?? ''),
+    (t) => !ESTADOS_FINALES.includes(t.estatus ?? ''),
   );
   const proximos48 = activos.filter(
-    (t) => getSemaforo(t.fechaLimiteSla, t.estadoTramite) === 'amarillo',
+    (t) => getSemaforo(t.fechaLimiteSla, t.estatus) === 'amarillo',
   );
   const vencidos = activos.filter(
-    (t) => getSemaforo(t.fechaLimiteSla, t.estadoTramite) === 'rojo',
+    (t) => getSemaforo(t.fechaLimiteSla, t.estatus) === 'rojo',
   );
   const urgentes = [...vencidos, ...proximos48];
 
   const now = startOfMonth(0);
+  // "Cancelado" = trámite no resuelto/rechazado en el flujo
   const rechMes = filtered.filter(
     (t) =>
-      t.resultadoGnp === 'RECHAZADO' &&
-      isDefined(t.fechaEntrada) &&
-      parseISO(t.fechaEntrada) >= now,
+      t.estatus === 'CANCELADO' &&
+      isDefined(t.fechaIngreso) &&
+      parseISO(t.fechaIngreso) >= now,
   );
 
   const cerrados = filtered.filter((t) =>
-    ESTADOS_FINALES.includes(t.estadoTramite ?? ''),
+    ESTADOS_FINALES.includes(t.estatus ?? ''),
   );
   const avgDias =
     cerrados.length > 0
       ? (
           cerrados.reduce((sum, t) => {
-            if (!t.fechaEntrada || !t.fechaLimiteSla) return sum;
+            if (!t.fechaIngreso || !t.fechaLimiteSla) return sum;
             return (
               sum +
               Math.max(
                 0,
                 differenceInDays(
                   parseISO(t.fechaLimiteSla),
-                  parseISO(t.fechaEntrada),
+                  parseISO(t.fechaIngreso),
                 ),
               )
             );
@@ -186,17 +187,17 @@ export const GerenteView = ({
         ).toFixed(1) + 'd'
       : '—';
 
-  // Agentes con rechazos en este ramo
+  // Agentes con cancelaciones en este ramo
   const agenteStats: Record<
     string,
     { name: string; total: number; rechazados: number }
   > = {};
   filtered.forEach((t) => {
-    const id = t.agenteTitular?.id ?? '?';
-    const nm = t.agenteTitular?.name ?? 'Desconocido';
+    const id = t.agente?.id ?? '?';
+    const nm = t.agente?.name ?? 'Desconocido';
     if (!isDefined(agenteStats[id])) agenteStats[id] = { name: nm, total: 0, rechazados: 0 };
     agenteStats[id].total++;
-    if (t.resultadoGnp === 'RECHAZADO') agenteStats[id].rechazados++;
+    if (t.estatus === 'CANCELADO') agenteStats[id].rechazados++;
   });
   const agenteList = Object.values(agenteStats)
     .filter((a) => a.rechazados > 0)
@@ -251,9 +252,9 @@ export const GerenteView = ({
               tramites={urgentes}
               columns={[
                 'folio',
-                'agenteTitular',
+                'agente',
                 'tipoTramite',
-                'especialistaAsignado',
+                'analistaAsignado',
                 'fechaLimiteSla',
               ]}
               onRowClick={setDetalle}
@@ -264,7 +265,7 @@ export const GerenteView = ({
         <StyledRow>
           <StyledCard style={{ width: '45%' }}>
             <StyledCardTitle>Top razones de rechazo — {ramo}</StyledCardTitle>
-            <RechazosChart razonesRechazo={razones} filterRamo={ramo} />
+            <RechazosChart razonesRechazo={motivosRechazo} filterRamo={ramo} />
           </StyledCard>
 
           <StyledCard style={{ flex: 1 }}>

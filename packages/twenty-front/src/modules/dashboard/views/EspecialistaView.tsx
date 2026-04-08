@@ -115,10 +115,10 @@ export const EspecialistaView = ({
 
   const selectedMember = members.find((m) => m.id === selectedId) ?? null;
   const mis = tramites.filter(
-    (t) => t.especialistaAsignado?.id === selectedId,
+    (t) => t.analistaAsignado?.id === selectedId,
   );
   const activos = mis.filter(
-    (t) => !ESTADOS_FINALES.includes(t.estadoTramite ?? ''),
+    (t) => !ESTADOS_FINALES.includes(t.estatus ?? ''),
   );
 
   // Vencen hoy
@@ -127,42 +127,42 @@ export const EspecialistaView = ({
     const limite = new Date(t.fechaLimiteSla);
     const hoy = new Date();
     return (
-      getSemaforo(t.fechaLimiteSla, t.estadoTramite) === 'rojo' &&
+      getSemaforo(t.fechaLimiteSla, t.estatus) === 'rojo' &&
       limite.toDateString() === hoy.toDateString()
     );
   });
 
-  const enRevision = activos.filter((t) => t.estadoTramite === 'EN_REVISION');
+  const enRevision = activos.filter((t) => t.estatus === 'EN_REVISION_DOC');
   const listosGnp = activos.filter(
-    (t) => t.estadoTramite === 'LISTO_PARA_GNP',
+    (t) => t.estatus === 'DOCUMENTACION_COMPLETA',
   );
 
   const now = startOfMonth();
   const cerradosMes = mis.filter(
     (t) =>
-      ESTADOS_FINALES.includes(t.estadoTramite ?? '') &&
-      isDefined(t.fechaEntrada) &&
-      parseISO(t.fechaEntrada) >= now,
+      ESTADOS_FINALES.includes(t.estatus ?? '') &&
+      isDefined(t.fechaIngreso) &&
+      parseISO(t.fechaIngreso) >= now,
   );
   const rechMes = mis.filter(
     (t) =>
-      t.resultadoGnp === 'RECHAZADO' &&
-      isDefined(t.fechaEntrada) &&
-      parseISO(t.fechaEntrada) >= now,
+      t.estatus === 'CANCELADO' &&
+      isDefined(t.fechaIngreso) &&
+      parseISO(t.fechaIngreso) >= now,
   );
 
   const avgDias =
     cerradosMes.length > 0
       ? (
           cerradosMes.reduce((sum, t) => {
-            if (!t.fechaEntrada || !t.fechaLimiteSla) return sum;
+            if (!t.fechaIngreso || !t.fechaLimiteSla) return sum;
             return (
               sum +
               Math.max(
                 0,
                 differenceInDays(
                   parseISO(t.fechaLimiteSla),
-                  parseISO(t.fechaEntrada),
+                  parseISO(t.fechaIngreso),
                 ),
               )
             );
@@ -217,10 +217,10 @@ export const EspecialistaView = ({
             tramites={activos}
             columns={[
               'folio',
-              'agenteTitular',
+              'agente',
               'tipoTramite',
               'ramo',
-              'estadoTramite',
+              'estatus',
               'fechaLimiteSla',
             ]}
             onRowClick={setDetalle}

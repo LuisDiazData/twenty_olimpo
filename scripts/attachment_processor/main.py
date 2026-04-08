@@ -19,16 +19,20 @@ import uvicorn
 from agent_llm import extract_passwords_from_text
 from agente_asignacion import router as asignacion_router
 from agente_documentos import router as documentos_router
+from email_ingest import router as email_ingest_router
 from extractor import process_attachments
 from supabase_client import (
     check_existing_thread,
     log_attachment_processing,
+    log_attachment_individual,
+    update_twenty_documento_id,
     log_inline_images,
     save_reply_record,
     upload_file,
     upload_file_to_path,
     supabase as _sb,
 )
+import twenty_sync
 
 load_dotenv(dotenv_path=Path(__file__).parent.parent.parent / ".env")
 
@@ -42,8 +46,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Email Attachment Processor API")
-app.include_router(documentos_router, prefix="/api/v1/agentes")
-app.include_router(asignacion_router, prefix="/api/v1/agentes")
+app.include_router(documentos_router,    prefix="/api/v1/agentes")
+app.include_router(asignacion_router,    prefix="/api/v1/agentes")
+app.include_router(email_ingest_router,  prefix="/api/v1")
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -141,6 +146,38 @@ async def _add_note_to_twenty(tramite_id: str, note_text: str) -> bool:
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
+def _detectar_mime(filename: str) -> str:
+    """Detecta MIME type básico por extensión de archivo."""
+    ext = os.path.splitext(filename.lower())[1]
+    mime_map = {
+        ".pdf": "application/pdf",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".gif": "image/gif",
+        ".tiff": "image/tiff",
+        ".webp": "image/webp",
+        ".xml": "application/xml",
+        ".txt": "text/plain",
+        ".doc": "application/msword",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".xls": "application/vnd.ms-excel",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".zip": "application/zip",
+        ".rar": "application/x-rar-compressed",
+    }
+    return mime_map.get(ext, "application/octet-stream")
+
+
+def _build_supabase_public_url(storage_path: str) -> str:
+    """Construye la URL pública de Supabase para un archivo en el bucket."""
+    supabase_url = os.getenv("SUPABASE_URL", "")
+    bucket_name = os.getenv("BUCKET_NAME", "tramites-docs")
+    if not supabase_url:
+        return storage_path
+    return f"{supabase_url}/storage/v1/object/public/{bucket_name}/{storage_path}"
+
+
 @app.post("/process-email")
 async def process_email(
     # Formato n8n: JSON blob con adjuntos en base64
@@ -151,6 +188,7 @@ async def process_email(
     body: str = Form(""),
     body_html: str = Form(""),
     attachments: List[UploadFile] = File(None),
+    tramite_twenty_id: Optional[str] = Form(None),  # si n8n ya tiene el ID del tramite (reply)
 ):
     """
     Recibe datos del correo + adjuntos desde n8n.
@@ -218,14 +256,75 @@ async def process_email(
         )
         files_to_upload = result.get("files_to_upload", [])
         total_received = result.get("total_received", 0)
+        enc_meta = result.get("encryption_metadata", {})
+
+        # Mapa path → tamaño para poder registrarlo en Supabase
+        path_size_map: dict[str, int] = {}
 
         for filename, file_bytes in files_to_upload:
             path = upload_file(email_id, filename, file_bytes)
             if path:
                 attachment_paths.append(path)
+                path_size_map[path] = len(file_bytes)
 
         total_successful = len(attachment_paths)
+        # Registro batch legacy (para compatibilidad con código existente)
         log_attachment_processing(email_id, total_received, total_successful, attachment_paths)
+
+        # Registro 1:1 por documento + sincronización con Twenty CRM
+        for path in attachment_paths:
+            nombre = path.split("/")[-1]
+            tamano = path_size_map.get(path, 0)
+            mime = _detectar_mime(nombre)
+            file_enc = enc_meta.get(nombre, {})
+            was_encrypted = file_enc.get("was_encrypted", False)
+            decryption_ok = file_enc.get("decryption_successful", True)
+
+            # 1. Registro individual en Supabase
+            doc_id = log_attachment_individual(
+                email_id=email_id,
+                tramite_id=email_id,
+                nombre=nombre,
+                storage_path=path,
+                mime_type=mime,
+                tamano_bytes=tamano,
+                was_encrypted=was_encrypted,
+                decryption_successful=decryption_ok,
+            )
+
+            # 2. Crear documentoAdjunto en Twenty (best-effort)
+            twenty_doc_id = await twenty_sync.crear_documento_adjunto(
+                nombre_archivo=nombre,
+                url_archivo=_build_supabase_public_url(path),
+                mime_type=mime,
+                tamano_bytes=tamano,
+                canal_origen="CORREO",
+                fecha_recepcion=datetime.utcnow().isoformat(),
+                tramite_id=tramite_twenty_id or None,
+            )
+
+            if twenty_doc_id:
+                # 3. Guardar ID de Twenty en Supabase
+                if doc_id:
+                    update_twenty_documento_id(doc_id, twenty_doc_id)
+
+                # 4. Actualizar encriptación
+                if was_encrypted:
+                    enc_status = "CON_PASSWORD" if not decryption_ok else "SIN_PASSWORD"
+                else:
+                    enc_status = "SIN_PASSWORD"
+                await twenty_sync.actualizar_encriptacion(twenty_doc_id, enc_status)
+
+                # 5. Registrar historial inicial
+                await twenty_sync.registrar_historial_estatus(
+                    entidad_tipo="documentoAdjunto",
+                    entidad_id=twenty_doc_id,
+                    estatus_anterior="",
+                    estatus_nuevo="PENDIENTE",
+                    tramite_id=tramite_twenty_id or None,
+                    motivo_cambio=f"Documento recibido vía correo: {nombre}",
+                    cambio_automatico=True,
+                )
 
     # Extraer imágenes inline del cuerpo HTML
     inline_images = extract_inline_images_from_html(body_html, email_id)
@@ -316,6 +415,48 @@ async def process_reply(data: ProcessReplyRequest):
 @app.get("/health")
 async def health():
     return {"status": "ok", "ts": datetime.utcnow().isoformat()}
+
+
+@app.post("/webhook/twenty")
+async def twenty_webhook(payload: dict):
+    """
+    Recibe eventos de Twenty CRM via webhook (Settings > Webhooks).
+    Evento configurado: documentoAdjunto.updated
+
+    Registra en historialEstatus cuando un analista cambia manualmente:
+      - tipoDocumento (etiquetado manual)
+      - estatusProcesamiento (confirmar revisión)
+    """
+    object_name = (payload.get("objectMetadata") or {}).get("nameSingular", "")
+    if object_name != "documentoAdjunto":
+        return {"ok": True, "skipped": True}
+
+    record = payload.get("record") or {}
+    previous = payload.get("previousRecord") or {}
+    doc_id = record.get("id")
+    tramite_rel = record.get("tramite") or {}
+    tramite_id = tramite_rel.get("id") if isinstance(tramite_rel, dict) else None
+
+    if not doc_id:
+        return {"ok": True, "skipped": True}
+
+    # Detectar cambio de tipoDocumento → etiquetado manual por analista
+    tipo_nuevo = (record.get("tipoDocumento") or {}).get("id") if isinstance(record.get("tipoDocumento"), dict) else record.get("tipoDocumento")
+    tipo_prev = (previous.get("tipoDocumento") or {}).get("id") if isinstance(previous.get("tipoDocumento"), dict) else previous.get("tipoDocumento")
+
+    if tipo_nuevo and tipo_nuevo != tipo_prev:
+        logger.info(f"webhook/twenty: analista cambió tipoDocumento de doc {doc_id}")
+        await twenty_sync.registrar_historial_estatus(
+            entidad_tipo="documentoAdjunto",
+            entidad_id=doc_id,
+            estatus_anterior=previous.get("estatusProcesamiento", ""),
+            estatus_nuevo=record.get("estatusProcesamiento", ""),
+            tramite_id=tramite_id,
+            motivo_cambio="Tipo de documento actualizado manualmente por analista",
+            cambio_automatico=False,
+        )
+
+    return {"ok": True}
 
 
 # ─── GraphQL helper ───────────────────────────────────────────────────────────

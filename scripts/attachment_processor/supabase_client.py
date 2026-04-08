@@ -152,6 +152,104 @@ def check_existing_thread(thread_id: str) -> dict:
         return {"found": False}
 
 
+# ── Per-document logging (1:1 con documentoAdjunto en Twenty) ─────────────────
+
+def log_attachment_individual(
+    email_id: str,
+    tramite_id: str,
+    nombre: str,
+    storage_path: str,
+    mime_type: str,
+    tamano_bytes: int,
+    was_encrypted: bool = False,
+    decryption_successful: bool = True,
+) -> str | None:
+    """
+    Inserta un registro individual en attachments_log por documento.
+    A diferencia de log_attachment_processing (batch), este es 1:1.
+    Retorna el UUID del nuevo registro o None si falla.
+    """
+    if not supabase:
+        return None
+
+    data = {
+        "email_id":              email_id,
+        "tramite_id":            tramite_id,
+        "nombre":                nombre,
+        "storage_path":          storage_path,
+        "mime_type":             mime_type,
+        "tamano_bytes":          tamano_bytes,
+        "was_encrypted":         was_encrypted,
+        "decryption_successful": decryption_successful,
+        "bucket_id":             BUCKET_NAME,
+        "clasificacion_completada": False,
+        "ocr_completado":        False,
+        "es_inline":             False,
+    }
+    try:
+        resp = supabase.table("attachments_log").insert(data).execute()
+        rows = resp.data or []
+        doc_id = rows[0].get("id") if rows else None
+        if doc_id:
+            print(f"log_attachment_individual: {nombre} → {doc_id}")
+        return doc_id
+    except Exception as e:
+        print(f"Error en log_attachment_individual para {nombre}: {e}")
+        return None
+
+
+def update_twenty_documento_id(doc_id: str, twenty_documento_id: str) -> None:
+    """
+    Actualiza twenty_documento_id en attachments_log después de crear
+    el documentoAdjunto en Twenty CRM.
+    """
+    if not supabase or not doc_id or not twenty_documento_id:
+        return
+    try:
+        supabase.table("attachments_log").update(
+            {"twenty_documento_id": twenty_documento_id}
+        ).eq("id", doc_id).execute()
+    except Exception as e:
+        print(f"Error actualizando twenty_documento_id para {doc_id}: {e}")
+
+
+# Cache para get_tipo_documento_map (TTL 5 min, evita round-trips repetidos)
+_tipo_doc_map_cache: dict[str, str] = {}
+_tipo_doc_map_ttl: object = None  # datetime
+
+
+def get_tipo_documento_map() -> dict[str, str]:
+    """
+    Carga el mapeo etiqueta_ia → clave_twenty desde tipo_documento_config.
+    Cache in-process de 5 minutos.
+    Retorna {} si Supabase no está disponible.
+    """
+    global _tipo_doc_map_cache, _tipo_doc_map_ttl
+    from datetime import datetime, timedelta
+
+    now = datetime.utcnow()
+    if _tipo_doc_map_ttl and now < _tipo_doc_map_ttl and _tipo_doc_map_cache:
+        return _tipo_doc_map_cache
+
+    if not supabase:
+        return _tipo_doc_map_cache  # retorna último cache aunque esté vencido
+
+    try:
+        resp = (
+            supabase.table("tipo_documento_config")
+            .select("etiqueta_ia, clave_twenty")
+            .eq("activo", True)
+            .execute()
+        )
+        rows = resp.data or []
+        _tipo_doc_map_cache = {r["etiqueta_ia"]: r["clave_twenty"] for r in rows}
+        _tipo_doc_map_ttl = now + timedelta(minutes=5)
+    except Exception as e:
+        print(f"Error cargando tipo_documento_config: {e}")
+
+    return _tipo_doc_map_cache
+
+
 def save_reply_record(thread_id: str, message_id: str,
                       twenty_tramite_id: str | None = None,
                       email_from: str = "",

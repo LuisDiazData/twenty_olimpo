@@ -5,7 +5,17 @@
       "Bash(API=\"http://localhost:3000/rest/metadata/fields\" TOKEN=\"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1MDEzZDMwOS1jOTAyLTQzYzQtYWQ3MC05MzBjYzY1OWU0NzEiLCJ0eXBlIjoiQVBJX0tFWSIsIndvcmtzcGFjZUlkIjoiNTAxM2QzMDktYzkwMi00M2M0LWFkNzAtOTMwY2M2NTllNDcxIiwiaWF0IjoxNzc0NDAzMzAyLCJleHAiOjQ5MjgwMDMzMDEsImp0aSI6IjBkN2E1YTViLTFmYTUtNGI2Ny1iMzEwLWJkYWRiMzkyYTNmNSJ9.DPiIwzGz1lmReVKZcZYqGjb8iJHm38742uFIaYDGf7o\" OBJ=\"58697ca3-1a17-4298-b08b-22d53e180486\" WM=\"c312bc10-4a79-4fa7-8e2b-ffeddd1b8704\" __NEW_LINE_b3a3feeb77c2696d__ echo \"=== Gerente de Desarrollo \\(RELATION\\) ===\" curl -s -X POST \"$API\" -H \"Authorization: $TOKEN\" -H \"Content-Type: application/json\" -d \"{:*)",
       "Bash(curl -s \"http://localhost:3000/rest/metadata/objects/58697ca3-1a17-4298-b08b-22d53e180486\" -H \"Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI1MDEzZDMwOS1jOTAyLTQzYzQtYWQ3MC05MzBjYzY1OWU0NzEiLCJ0eXBlIjoiQVBJX0tFWSIsIndvcmtzcGFjZUlkIjoiNTAxM2QzMDktYzkwMi00M2M0LWFkNzAtOTMwY2M2NTllNDcxIiwiaWF0IjoxNzc0NDAzMzAyLCJleHAiOjQ5MjgwMDMzMDEsImp0aSI6IjBkN2E1YTViLTFmYTUtNGI2Ny1iMzEwLWJkYWRiMzkyYTNmNSJ9.DPiIwzGz1lmReVKZcZYqGjb8iJHm38742uFIaYDGf7o\")",
       "Bash(xargs grep:*)",
-      "Bash(grep -r \"public\\\\|core\\\\|metadata\\\\|workspace\" /c/Users/wichi/twenty_olimpo/packages/twenty-server/src/database/typeorm -name \"*.ts\" --include=\"*.ts\")"
+      "Bash(grep -r \"public\\\\|core\\\\|metadata\\\\|workspace\" /c/Users/wichi/twenty_olimpo/packages/twenty-server/src/database/typeorm -name \"*.ts\" --include=\"*.ts\")",
+      "Bash(docker info:*)",
+      "Bash(sudo docker:*)",
+      "Bash(ls:*)",
+      "Bash(curl:*)",
+      "Bash(jq '.data.objects.edges[] | select\\(.node.isCustom == true\\) | .node | \"\\\\\\(.nameSingular\\):\\\\\\(.id\\)\"' -r)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "postgres",
+    "playwright",
+    "context7"
+  ]
 }

@@ -1,9 +1,11 @@
 import { styled } from '@linaria/react';
+import { useState } from 'react';
+import { DashboardFiltersBar } from './components/DashboardFilters';
 import { useDashboardData } from './hooks/useDashboardData';
+import type { DashboardFilters } from './types/dashboard.types';
 import { DirectoraView } from './views/DirectoraView';
 import { EspecialistaView } from './views/EspecialistaView';
 import { GerenteView } from './views/GerenteView';
-import { useState } from 'react';
 
 type Vista = 'directora' | 'gerente' | 'especialista';
 
@@ -12,6 +14,12 @@ const VISTA_OPTIONS: { key: Vista; label: string; icon: string }[] = [
   { key: 'gerente', label: 'Gerente', icon: '👥' },
   { key: 'especialista', label: 'Especialista', icon: '👤' },
 ];
+
+const DEFAULT_FILTERS: DashboardFilters = {
+  periodo: 'mes',
+  ramo: 'todos',
+  gerenteId: null,
+};
 
 // ─── Styled components ────────────────────────────────────────────────────────
 
@@ -120,6 +128,11 @@ const SkeletonLoader = () => (
       ))}
     </StyledSkeletonRow>
     <StyledSkeletonRow>
+      {[1, 2, 3, 4].map((i) => (
+        <StyledSkeletonBlock key={i} style={{ flex: 1, height: 88 }} />
+      ))}
+    </StyledSkeletonRow>
+    <StyledSkeletonRow>
       <StyledSkeletonBlock style={{ width: '27%', height: 260 }} />
       <StyledSkeletonBlock style={{ flex: 1, height: 260 }} />
       <StyledSkeletonBlock style={{ width: '23%', height: 260 }} />
@@ -165,7 +178,8 @@ const StyledRetryButton = styled.button`
 
 export const DashboardPage = () => {
   const [vista, setVista] = useState<Vista>('directora');
-  const data = useDashboardData();
+  const [filters, setFilters] = useState<DashboardFilters>(DEFAULT_FILTERS);
+  const data = useDashboardData(filters);
 
   return (
     <StyledPage>
@@ -182,6 +196,12 @@ export const DashboardPage = () => {
         ))}
         <StyledRefreshNote>Actualiza cada 60s</StyledRefreshNote>
       </StyledTopBar>
+
+      <DashboardFiltersBar
+        filters={filters}
+        onChange={setFilters}
+        members={data.members}
+      />
 
       <StyledViewContainer>
         {data.isLoading && <SkeletonLoader />}

@@ -60,7 +60,7 @@ const StyledDot = styled.span`
 
 export const DonaRamo = ({ tramites }: DonaRamoProps) => {
   const activos = tramites.filter(
-    (t) => !ESTADOS_FINALES.includes(t.estadoTramite ?? ''),
+    (t) => !ESTADOS_FINALES.includes(t.estatus ?? ''),
   );
 
   const data = RAMOS.map((ramo) => ({

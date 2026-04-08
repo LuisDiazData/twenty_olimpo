@@ -41,6 +41,7 @@ class MatchAgente(BaseModel):
     confidence: int = Field(0, description="0-100")
 
 from supabase_client import supabase as _sb
+import twenty_sync
 
 load_dotenv(dotenv_path=Path(__file__).parent.parent.parent / ".env")
 
@@ -561,6 +562,40 @@ async def _crear_tramite_twenty(
     return tramite_id
 
 
+async def _vincular_documentos_al_tramite(email_id: str, twenty_tramite_id: str) -> int:
+    """
+    Vincula todos los documentoAdjunto del email al tramite recién creado en Twenty.
+    Retorna el número de documentos vinculados exitosamente.
+    """
+    if not _sb or not twenty_tramite_id:
+        return 0
+
+    try:
+        resp = (
+            _sb.table("attachments_log")
+            .select("twenty_documento_id")
+            .eq("tramite_id", email_id)
+            .not_.is_("twenty_documento_id", "null")
+            .execute()
+        )
+        docs = resp.data or []
+    except Exception as exc:
+        logger.warning(f"Error obteniendo docs para vincular al tramite: {exc}")
+        return 0
+
+    count = 0
+    for row in docs:
+        doc_twenty_id = row.get("twenty_documento_id")
+        if doc_twenty_id:
+            ok = await twenty_sync.vincular_documento_a_tramite(doc_twenty_id, twenty_tramite_id)
+            if ok:
+                count += 1
+
+    if count:
+        logger.info(f"Vinculados {count} documentoAdjunto al tramite {twenty_tramite_id}")
+    return count
+
+
 # ── Supabase helpers ────────────────────────────────────────────────────────────
 
 def _registrar_historial(
@@ -778,6 +813,11 @@ async def agente_asignacion(data: AsignacionRequest):
             500,
             {"error": f"No se pudo crear el trámite en Twenty: {error_msg}", "tramite_id": tramite_id}
         )
+
+    # ── Paso 7c.5: Vincular documentoAdjunto al tramite recién creado ──────────
+    docs_vinculados = await _vincular_documentos_al_tramite(tramite_id, twenty_tramite_id)
+    if docs_vinculados:
+        logger.info(f"Vinculados {docs_vinculados} docs al tramite {twenty_tramite_id}")
 
     # ── Paso 7d / 8b: Update tramites_pipeline ──────────────────────────────
     final_status = "revision_manual" if motivo_revision else "completado"

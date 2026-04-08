@@ -120,17 +120,22 @@ def extract_rar(file_bytes: bytes, passwords: List[str]) -> List[Tuple[str, byte
 def process_attachments(attachments: List[Tuple[str, bytes]], email_body: str, get_passwords_hook=None) -> Dict[str, Any]:
     """
     Main entrypoint for processing attachments.
-    Returns metadata about success/fail, and a list of final files to upload.
+    Returns metadata about success/fail, a list of final files to upload,
+    and encryption_metadata with per-file encryption info.
+
+    encryption_metadata format:
+      { "filename.pdf": { "was_encrypted": bool, "decryption_successful": bool, "encryption_type": str } }
+    encryption_type: "none" | "pdf_password" | "zip_password" | "rar_password" | "error"
     """
-    final_files = [] # list of (filename, bytes)
+    final_files: List[Tuple[str, bytes]] = []
     total_received = len(attachments)
-    
-    # We delay calling the LLM until we actually encounter a password-protected file
-    # to save costs and time.
-    llm_passwords = []
+    enc_meta: Dict[str, Dict[str, Any]] = {}
+
+    # Delay calling the LLM until we actually encounter a password-protected file.
+    llm_passwords: List[str] = []
     passwords_fetched = False
 
-    def get_pwds():
+    def get_pwds() -> List[str]:
         nonlocal llm_passwords, passwords_fetched
         if not passwords_fetched:
             if get_passwords_hook:
@@ -140,40 +145,121 @@ def process_attachments(attachments: List[Tuple[str, bytes]], email_body: str, g
 
     for filename, data in attachments:
         if is_signature_image(filename, len(data)):
-            # Skip signatures
             continue
-            
+
         ext = os.path.splitext(filename.lower())[1]
-        
+
         try:
             if ext == '.zip':
+                # Track encryption: pyzipper flag_bits & 0x1 means encrypted
+                # We check by attempting extraction — extract_zip handles passwords internally
+                try:
+                    import pyzipper
+                    import io as _io
+                    with pyzipper.AESZipFile(_io.BytesIO(data)) as zf:
+                        any_encrypted = any(info.flag_bits & 0x1 for info in zf.infolist() if not info.is_dir())
+                except Exception:
+                    any_encrypted = False
+
                 extracted = extract_zip(data, get_pwds())
                 if extracted:
                     final_files.extend(extracted)
+                    enc_meta[filename] = {
+                        "was_encrypted": any_encrypted,
+                        "decryption_successful": True,
+                        "encryption_type": "zip_password" if any_encrypted else "none",
+                    }
                 else:
-                    # Si no se pudo extraer nada (posiblemente por contraseña errónea), guarda el zip original
                     final_files.append((filename, data))
+                    enc_meta[filename] = {
+                        "was_encrypted": any_encrypted,
+                        "decryption_successful": False,
+                        "encryption_type": "zip_password" if any_encrypted else "none",
+                    }
+
             elif ext == '.rar':
+                import rarfile as _rarfile
+                import tempfile, os as _os
+                try:
+                    with tempfile.NamedTemporaryFile(suffix='.rar', delete=False) as tmp:
+                        tmp.write(data)
+                        tmp_path = tmp.name
+                    with _rarfile.RarFile(tmp_path) as rf:
+                        rar_encrypted = rf.needs_password()
+                    _os.remove(tmp_path)
+                except Exception:
+                    rar_encrypted = False
+
                 extracted = extract_rar(data, get_pwds())
                 if extracted:
                     final_files.extend(extracted)
+                    enc_meta[filename] = {
+                        "was_encrypted": rar_encrypted,
+                        "decryption_successful": True,
+                        "encryption_type": "rar_password" if rar_encrypted else "none",
+                    }
                 else:
-                    # Si no se pudo extraer nada, guarda el rar original
                     final_files.append((filename, data))
+                    enc_meta[filename] = {
+                        "was_encrypted": rar_encrypted,
+                        "decryption_successful": False,
+                        "encryption_type": "rar_password" if rar_encrypted else "none",
+                    }
+
             elif ext == '.pdf':
-                clean_pdf_bytes = try_decrypt_pdf(data, get_pwds())
-                final_files.append((filename, clean_pdf_bytes))
+                # Attempt open without password first to detect encryption
+                try:
+                    import io as _io
+                    pikepdf.Pdf.open(_io.BytesIO(data))
+                    # Opens fine — not encrypted
+                    clean_pdf_bytes = try_decrypt_pdf(data, [])
+                    final_files.append((filename, clean_pdf_bytes))
+                    enc_meta[filename] = {
+                        "was_encrypted": False,
+                        "decryption_successful": True,
+                        "encryption_type": "none",
+                    }
+                except pikepdf.PasswordError:
+                    # Encrypted — try with LLM passwords
+                    try:
+                        clean_pdf_bytes = try_decrypt_pdf(data, get_pwds())
+                        final_files.append((filename, clean_pdf_bytes))
+                        enc_meta[filename] = {
+                            "was_encrypted": True,
+                            "decryption_successful": True,
+                            "encryption_type": "pdf_password",
+                        }
+                    except ValueError:
+                        # Could not decrypt — keep original
+                        final_files.append((filename, data))
+                        enc_meta[filename] = {
+                            "was_encrypted": True,
+                            "decryption_successful": False,
+                            "encryption_type": "pdf_password",
+                        }
+
             else:
-                # Any other file type (doc, jpeg > 20kb, etc.) gets passed along as is
+                # Any other file type (doc, jpeg > 20kb, etc.)
                 final_files.append((filename, data))
-                
+                enc_meta[filename] = {
+                    "was_encrypted": False,
+                    "decryption_successful": True,
+                    "encryption_type": "none",
+                }
+
         except Exception as e:
             print(f"Error processing {filename}: {e}")
-            # RESPALDO: Si no logramos desencriptar o hubo cualquier otro error, guardamos el original
+            # Fallback: keep original, mark as error
             final_files.append((filename, data))
+            enc_meta[filename] = {
+                "was_encrypted": False,
+                "decryption_successful": False,
+                "encryption_type": "error",
+            }
 
     return {
         "total_received": total_received,
         "successful_files": len(final_files),
-        "files_to_upload": final_files
+        "files_to_upload": final_files,
+        "encryption_metadata": enc_meta,
     }

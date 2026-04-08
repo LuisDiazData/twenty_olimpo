@@ -1,15 +1,20 @@
 import { gql } from '@apollo/client';
 import { useQuery } from '@apollo/client/react';
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import type {
+  AgentPerformance,
+  AgenteCompliance,
   DashboardData,
+  DashboardFilters,
+  KpiSnapshot,
   Member,
-  RazonRechazo,
+  MotivoRechazo,
   Tramite,
 } from '../types/dashboard.types';
 
 // ─── GraphQL Queries ──────────────────────────────────────────────────────────
 
+// Usa los nombres reales de campos del schema de Twenty CRM
 const GET_TRAMITES = gql`
   query DashboardTramites {
     tramites(first: 500) {
@@ -17,22 +22,20 @@ const GET_TRAMITES = gql`
         node {
           id
           name
+          folio
+          folioGnp
           ramo
-          estadoTramite
-          fechaEntrada
-          fechaLimiteSla
-          resultadoGnp
+          estatus
           tipoTramite
-          fueraDeSla
-          notasAnalista
-          folioInterno
-          numPolizaGnp
-          nombreAsegurado
-          agenteTitular {
+          prioridad
+          fechaIngreso
+          fechaLimiteSla
+          fechaResolucion
+          agente {
             id
             name
           }
-          especialistaAsignado {
+          analistaAsignado {
             id
             name {
               firstName
@@ -45,20 +48,16 @@ const GET_TRAMITES = gql`
   }
 `;
 
-const GET_RAZONES = gql`
-  query DashboardRazones {
-    razonesRechazo(first: 200) {
+const GET_MOTIVOS_RECHAZO = gql`
+  query DashboardMotivosRechazo {
+    motivosRechazo(first: 200) {
       edges {
         node {
           id
           name
-          categoria
-          descripcion
-          frecuencia
-          tramite {
-            id
-            ramo
-          }
+          ramo
+          tipoTramite
+          activo
         }
       }
     }
@@ -81,16 +80,107 @@ const GET_MEMBERS = gql`
   }
 `;
 
+const GET_KPI_SNAPSHOTS = gql`
+  query DashboardKpiSnapshots {
+    kpiSnapshots(
+      filter: { granularidad: { eq: "MENSUAL" }, entidadTipo: { eq: "Global" } }
+      first: 20
+      orderBy: { fechaCorte: DescNullsLast }
+    ) {
+      edges {
+        node {
+          id
+          metricaNombre
+          granularidad
+          entidadTipo
+          valor
+          meta
+          metaAlcanzada
+          unidad
+          fechaCorte
+        }
+      }
+    }
+  }
+`;
+
+// agentPerformanceMonthly aún no existe en Twenty (objeto pendiente de crear)
+// errorPolicy: 'ignore' evita que rompa el dashboard
+const GET_AGENT_PERFORMANCE = gql`
+  query DashboardAgentPerformance {
+    agentPerformanceMonthly(
+      first: 20
+      orderBy: { primaEmitida: DescNullsLast }
+      filter: { esVigente: { eq: true } }
+    ) {
+      edges {
+        node {
+          id
+          mesAnio
+          tramitesTotales
+          tramitesResueltos
+          firstPassYield
+          primaEmitida
+          tasaCumplimientoSla
+          bonoProyectado
+          agente {
+            id
+            name
+            claveAgente
+          }
+        }
+      }
+    }
+  }
+`;
+
+const GET_AGENTES_COMPLIANCE = gql`
+  query DashboardAgentes {
+    agentes(first: 200, filter: { estatus: { eq: "ACTIVO" } }) {
+      edges {
+        node {
+          id
+          name
+          claveAgente
+          fechaVencimientoCedula
+          estatus
+          gerenteDesarrollo {
+            id
+            name {
+              firstName
+              lastName
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+const getPeriodoInicio = (periodo: DashboardFilters['periodo']): Date => {
+  const now = new Date();
+  if (periodo === 'mes') {
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  }
+  if (periodo === 'trimestre') {
+    return new Date(now.getFullYear(), now.getMonth() - 2, 1);
+  }
+  // anio
+  return new Date(now.getFullYear(), 0, 1);
+};
+
 // ─── Hook ────────────────────────────────────────────────────────────────────
 
-export const useDashboardData = (): DashboardData => {
+export const useDashboardData = (filters: DashboardFilters): DashboardData => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tramitesResult = useQuery<any>(GET_TRAMITES, {
     fetchPolicy: 'cache-and-network',
   });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const razonesResult = useQuery<any>(GET_RAZONES, {
+  const motivosResult = useQuery<any>(GET_MOTIVOS_RECHAZO, {
     fetchPolicy: 'cache-and-network',
   });
 
@@ -99,28 +189,77 @@ export const useDashboardData = (): DashboardData => {
     fetchPolicy: 'cache-and-network',
   });
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const kpiResult = useQuery<any>(GET_KPI_SNAPSHOTS, {
+    fetchPolicy: 'cache-and-network',
+    errorPolicy: 'ignore',
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const agentPerfResult = useQuery<any>(GET_AGENT_PERFORMANCE, {
+    fetchPolicy: 'cache-and-network',
+    errorPolicy: 'ignore',
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const agentesResult = useQuery<any>(GET_AGENTES_COMPLIANCE, {
+    fetchPolicy: 'cache-and-network',
+    errorPolicy: 'ignore',
+  });
+
   // Auto-refresh every 60 seconds
   useEffect(() => {
     tramitesResult.startPolling(60_000);
-    razonesResult.startPolling(60_000);
+    motivosResult.startPolling(60_000);
     return () => {
       tramitesResult.stopPolling();
-      razonesResult.stopPolling();
+      motivosResult.stopPolling();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const tramites: Tramite[] =
+  // Raw data
+  const allTramites: Tramite[] =
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     tramitesResult.data?.tramites?.edges?.map((e: any) => e.node) ?? [];
 
-  const razones: RazonRechazo[] =
+  const motivosRechazo: MotivoRechazo[] =
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    razonesResult.data?.razonesRechazo?.edges?.map((e: any) => e.node) ?? [];
+    motivosResult.data?.motivosRechazo?.edges?.map((e: any) => e.node) ?? [];
 
   const members: Member[] =
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     membersResult.data?.workspaceMembers?.edges?.map((e: any) => e.node) ?? [];
+
+  const kpiSnapshots: KpiSnapshot[] =
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    kpiResult.data?.kpiSnapshots?.edges?.map((e: any) => e.node) ?? [];
+
+  const agentPerformance: AgentPerformance[] =
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    agentPerfResult.data?.agentPerformanceMonthly?.edges?.map((e: any) => e.node) ?? [];
+
+  const agentes: AgenteCompliance[] =
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    agentesResult.data?.agentes?.edges?.map((e: any) => e.node) ?? [];
+
+  // Aplicar filtros a tramites
+  const periodoInicio = useMemo(() => getPeriodoInicio(filters.periodo), [filters.periodo]);
+
+  const tramites = useMemo(() => {
+    return allTramites
+      .filter((t) => filters.ramo === 'todos' || t.ramo === filters.ramo)
+      .filter(
+        (t) =>
+          !filters.gerenteId ||
+          t.analistaAsignado?.id === filters.gerenteId,
+      )
+      .filter(
+        (t) =>
+          !t.fechaIngreso ||
+          new Date(t.fechaIngreso) >= periodoInicio,
+      );
+  }, [allTramites, filters, periodoInicio]);
 
   const isLoading =
     (tramitesResult.loading && !tramitesResult.data) ||
@@ -128,15 +267,29 @@ export const useDashboardData = (): DashboardData => {
 
   const error =
     tramitesResult.error?.message ||
-    razonesResult.error?.message ||
+    motivosResult.error?.message ||
     membersResult.error?.message ||
     null;
 
   const refetch = () => {
     void tramitesResult.refetch();
-    void razonesResult.refetch();
+    void motivosResult.refetch();
     void membersResult.refetch();
+    void kpiResult.refetch();
+    void agentPerfResult.refetch();
+    void agentesResult.refetch();
   };
 
-  return { tramites, razones, members, isLoading, error, refetch };
+  return {
+    tramites,
+    motivosRechazo,
+    members,
+    kpiSnapshots,
+    agentPerformance,
+    agentes,
+    filters,
+    isLoading,
+    error,
+    refetch,
+  };
 };

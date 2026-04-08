@@ -1,8 +1,8 @@
 import { styled } from '@linaria/react';
-import type { RazonRechazo } from '../types/dashboard.types';
+import type { MotivoRechazo } from '../types/dashboard.types';
 
 interface RechazosChartProps {
-  razonesRechazo: RazonRechazo[];
+  razonesRechazo: MotivoRechazo[];
   filterRamo?: string;
 }
 
@@ -59,14 +59,14 @@ export const RechazosChart = ({
   filterRamo,
 }: RechazosChartProps) => {
   const filtered = filterRamo
-    ? razonesRechazo.filter((r) => r.tramite?.ramo === filterRamo)
+    ? razonesRechazo.filter((r) => r.ramo === filterRamo)
     : razonesRechazo;
 
-  // Aggregate by categoria
+  // Aggregate by tipoTramite as category
   const agg: Record<string, number> = {};
   filtered.forEach((r) => {
-    const key = r.categoria ?? r.name;
-    agg[key] = (agg[key] ?? 0) + (r.frecuencia ?? 1);
+    const key = r.tipoTramite ?? r.name;
+    agg[key] = (agg[key] ?? 0) + 1;
   });
 
   const items = Object.entries(agg)

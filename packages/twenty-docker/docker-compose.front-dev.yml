@@ -1,0 +1,40 @@
+# Front-end dev server with hot reload
+# Serves modified dashboard source on http://localhost:3001
+# Backend must already be running (docker compose up -d)
+#
+# Usage:
+#   docker compose -f docker-compose.front-dev.yml up
+#
+# First run installs deps (~5 min). Subsequent runs are instant.
+
+name: twenty-front-dev
+
+services:
+  front:
+    image: node:24-alpine
+    working_dir: /app
+    ports:
+      - "3001:3001"
+    volumes:
+      # Source code (read-write so Vite can watch)
+      - ../../:/app
+      # Dedicated node_modules volume — avoids conflict with host and
+      # persists across restarts so yarn install only runs once
+      - front-dev-node-modules:/app/node_modules
+    environment:
+      REACT_APP_SERVER_BASE_URL: http://localhost:3000
+      REACT_APP_PORT: "3001"
+      VITE_HOST: "0.0.0.0"
+    # network_mode host lets the container reach host's :3000 directly
+    network_mode: host
+    command: >
+      sh -c "
+        corepack enable &&
+        echo '=== Installing dependencies (only on first run) ===' &&
+        yarn install --immutable &&
+        echo '=== Starting dev server at http://localhost:3001 ===' &&
+        npx nx start twenty-front
+      "
+
+volumes:
+  front-dev-node-modules:

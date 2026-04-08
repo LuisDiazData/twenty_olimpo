@@ -1,6 +1,6 @@
 import { styled } from '@linaria/react';
 import { format, parseISO } from 'date-fns';
-import { ESTADO_LABEL, RAMO_COLORS, TIPO_LABEL } from '../constants/colors';
+import { ESTADO_COLORS, ESTADO_LABEL, RAMO_COLORS, TIPO_LABEL } from '../constants/colors';
 import type { Tramite } from '../types/dashboard.types';
 import { SEMAFORO_HEX, SEMAFORO_LABEL, getSemaforo } from '../utils/semaforo';
 
@@ -123,15 +123,6 @@ const memberFullName = (
   return `${m.name.firstName} ${m.name.lastName}`.trim() || '—';
 };
 
-const estadoColor: Record<string, { bg: string; color: string }> = {
-  PENDIENTE: { bg: 'rgba(156,154,146,.15)', color: '#9c9a92' },
-  EN_REVISION: { bg: 'rgba(24,95,165,.2)', color: '#5fa8e8' },
-  LISTO_PARA_GNP: { bg: 'rgba(186,117,23,.2)', color: '#e6a020' },
-  ENVIADO_A_GNP: { bg: 'rgba(24,95,165,.2)', color: '#5fa8e8' },
-  APROBADO_GNP: { bg: 'rgba(29,158,117,.2)', color: '#22c78a' },
-  RECHAZADO_GNP: { bg: 'rgba(163,45,45,.2)', color: '#e05252' },
-  CERRADO: { bg: 'rgba(156,154,146,.15)', color: '#9c9a92' },
-};
 
 export const TramiteDetailPanel = ({
   tramite,
@@ -139,8 +130,8 @@ export const TramiteDetailPanel = ({
 }: TramiteDetailPanelProps) => {
   if (!tramite) return null;
 
-  const sem = getSemaforo(tramite.fechaLimiteSla, tramite.estadoTramite);
-  const estilo = estadoColor[tramite.estadoTramite ?? ''] ?? {
+  const sem = getSemaforo(tramite.fechaLimiteSla, tramite.estatus);
+  const estilo = ESTADO_COLORS[tramite.estatus ?? ''] ?? {
     bg: 'rgba(156,154,146,.15)',
     color: '#9c9a92',
   };
@@ -149,7 +140,7 @@ export const TramiteDetailPanel = ({
     <StyledOverlay onClick={onClose}>
       <StyledPanel onClick={(e) => e.stopPropagation()}>
         <StyledHeader>
-          <StyledTitle>{tramite.folioInterno ?? tramite.name}</StyledTitle>
+          <StyledTitle>{tramite.folio ?? tramite.name}</StyledTitle>
           <StyledClose onClick={onClose}>✕</StyledClose>
         </StyledHeader>
 
@@ -157,7 +148,7 @@ export const TramiteDetailPanel = ({
           <StyledBadge
             style={{ background: estilo.bg, color: estilo.color }}
           >
-            {ESTADO_LABEL[tramite.estadoTramite ?? ''] ?? tramite.estadoTramite ?? '—'}
+            {ESTADO_LABEL[tramite.estatus ?? ''] ?? tramite.estatus ?? '—'}
           </StyledBadge>
           <StyledBadge
             style={{
@@ -205,46 +196,32 @@ export const TramiteDetailPanel = ({
         <StyledField>
           <StyledFieldLabel>Agente titular</StyledFieldLabel>
           <StyledFieldValue>
-            {tramite.agenteTitular?.name ?? '—'}
+            {tramite.agente?.name ?? '—'}
           </StyledFieldValue>
         </StyledField>
 
         <StyledField>
-          <StyledFieldLabel>Especialista asignado</StyledFieldLabel>
+          <StyledFieldLabel>Analista asignado</StyledFieldLabel>
           <StyledFieldValue>
-            {memberFullName(tramite.especialistaAsignado)}
-          </StyledFieldValue>
-        </StyledField>
-
-        <StyledField>
-          <StyledFieldLabel>Asegurado</StyledFieldLabel>
-          <StyledFieldValue>
-            {tramite.nombreAsegurado ?? '—'}
+            {memberFullName(tramite.analistaAsignado)}
           </StyledFieldValue>
         </StyledField>
 
         <StyledDivider />
 
         <StyledField>
-          <StyledFieldLabel>No. póliza GNP</StyledFieldLabel>
+          <StyledFieldLabel>Folio GNP</StyledFieldLabel>
           <StyledFieldValue>
-            {tramite.numPolizaGnp || '—'}
-          </StyledFieldValue>
-        </StyledField>
-
-        <StyledField>
-          <StyledFieldLabel>Resultado GNP</StyledFieldLabel>
-          <StyledFieldValue>
-            {tramite.resultadoGnp ?? '—'}
+            {tramite.folioGnp || '—'}
           </StyledFieldValue>
         </StyledField>
 
         <StyledDivider />
 
         <StyledField>
-          <StyledFieldLabel>Fecha de entrada</StyledFieldLabel>
+          <StyledFieldLabel>Fecha de ingreso</StyledFieldLabel>
           <StyledFieldValue>
-            {formatDate(tramite.fechaEntrada)}
+            {formatDate(tramite.fechaIngreso)}
           </StyledFieldValue>
         </StyledField>
 
@@ -254,20 +231,6 @@ export const TramiteDetailPanel = ({
             {formatDate(tramite.fechaLimiteSla)}
           </StyledFieldValue>
         </StyledField>
-
-        {tramite.notasAnalista && (
-          <>
-            <StyledDivider />
-            <StyledField>
-              <StyledFieldLabel>Notas del analista</StyledFieldLabel>
-              <StyledFieldValue
-                style={{ color: '#9c9a92', lineHeight: 1.5, fontSize: 12 }}
-              >
-                {tramite.notasAnalista}
-              </StyledFieldValue>
-            </StyledField>
-          </>
-        )}
 
         <StyledLink
           href={`/object/tramite/${tramite.id}`}

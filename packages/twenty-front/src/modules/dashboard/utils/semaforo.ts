@@ -1,16 +1,17 @@
 import type { SemaforoColor } from '../types/dashboard.types';
 
-export const ESTADOS_CERRADOS = ['APROBADO_GNP', 'CERRADO'];
+// Trámites que llegaron a un estado terminal exitoso
+export const ESTADOS_CERRADOS = ['RESUELTO'];
 
-// Includes RECHAZADO_GNP as "resolved" for SLA purposes
-export const ESTADOS_FINALES = ['APROBADO_GNP', 'CERRADO', 'RECHAZADO_GNP'];
+// Todos los estados terminales (incluye cancelado)
+export const ESTADOS_FINALES = ['RESUELTO', 'CANCELADO'];
 
 export function getSemaforo(
   fechaLimiteSla: string | null | undefined,
-  estadoTramite: string | null | undefined,
+  estatus: string | null | undefined,
 ): SemaforoColor {
-  if (!estadoTramite) return 'gris';
-  if (ESTADOS_FINALES.includes(estadoTramite)) return 'verde';
+  if (!estatus) return 'gris';
+  if (ESTADOS_FINALES.includes(estatus)) return 'verde';
   if (!fechaLimiteSla) return 'gris';
   const horas =
     (new Date(fechaLimiteSla).getTime() - Date.now()) / 3_600_000;

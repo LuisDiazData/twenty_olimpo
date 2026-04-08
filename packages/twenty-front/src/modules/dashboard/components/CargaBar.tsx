@@ -63,15 +63,15 @@ export const CargaBar = ({
   onSelectMember,
 }: CargaBarProps) => {
   const activos = tramites.filter(
-    (t) => !ESTADOS_FINALES.includes(t.estadoTramite ?? ''),
+    (t) => !ESTADOS_FINALES.includes(t.estatus ?? ''),
   );
 
   const stats = members.map((m) => {
     const misTramites = activos.filter(
-      (t) => t.especialistaAsignado?.id === m.id,
+      (t) => t.analistaAsignado?.id === m.id,
     );
     const vencidos = misTramites.filter(
-      (t) => getSemaforo(t.fechaLimiteSla, t.estadoTramite) === 'rojo',
+      (t) => getSemaforo(t.fechaLimiteSla, t.estatus) === 'rojo',
     ).length;
     return { member: m, count: misTramites.length, vencidos };
   });
