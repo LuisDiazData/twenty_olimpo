@@ -147,10 +147,12 @@ services:
       N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD:-admin}
       GENERIC_TIMEZONE: America/Mexico_City
       TZ: America/Mexico_City
-      N8N_SECURE_COOKIE: "false"
-      # Pipeline agentes
+      N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE:-false}
+      # Pipeline agentes — credenciales para llamadas n8n → FastAPI
       AGENTES_BASE_URL: http://agentes:4000
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
       SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
       SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
       EQUIPO_EMAIL: ${EQUIPO_EMAIL:-operaciones@olimpo.com.mx}
     volumes:

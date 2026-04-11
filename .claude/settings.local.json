@@ -13,7 +13,13 @@
       "Bash(jq '.data.objects.edges[] | select\\(.node.isCustom == true\\) | .node | \"\\\\\\(.nameSingular\\):\\\\\\(.id\\)\"' -r)",
       "Bash(grep -r \"if __name__\" /home/lag/Documentos/twenty_olimpo/scripts/attachment_processor/*.py)",
       "Bash(grep -rh \"os\\\\.getenv\\\\|os\\\\.environ\" /home/lag/Documentos/twenty_olimpo/scripts/attachment_processor/*.py)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(git check-ignore:*)",
+      "Bash(wc -l scripts/attachment_processor/*.py)",
+      "Bash(cat)",
+      "Read(//tmp/**)",
+      "Bash(git -C /home/lag/Documentos/twenty_olimpo ls-files -- 'scripts/n8n/*.json')"
     ]
   },
   "enabledMcpjsonServers": [
