@@ -4,7 +4,11 @@
     {
       "parameters": {
         "pollTimes": {
-          "item": [{ "mode": "everyMinute" }]
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
         },
         "filters": {
           "readStatus": "unread",
@@ -19,7 +23,10 @@
       "name": "Gmail Trigger",
       "type": "n8n-nodes-base.gmailTrigger",
       "typeVersion": 1,
-      "position": [240, 300]
+      "position": [
+        240,
+        300
+      ]
     },
     {
       "parameters": {
@@ -29,18 +36,24 @@
       "name": "Preparar Prompt",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [460, 300]
+      "position": [
+        460,
+        300
+      ]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "https://api.runpod.ai/v2/c2jx606dtqs7g8/run",
+        "url": "=https://api.runpod.ai/v2/{{ $env.RUNPOD_ENDPOINT_ID }}/run",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Content-Type", "value": "application/json" }
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
           ]
         },
         "sendBody": true,
@@ -58,7 +71,10 @@
       "name": "RunPod: Enviar Job",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [680, 300],
+      "position": [
+        680,
+        300
+      ],
       "credentials": {
         "httpHeaderAuth": {
           "id": "runpod-auth",
@@ -75,13 +91,16 @@
       "name": "Esperar RunPod",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1,
-      "position": [900, 300],
+      "position": [
+        900,
+        300
+      ],
       "webhookId": "wait-runpod-webhook"
     },
     {
       "parameters": {
         "method": "GET",
-        "url": "=https://api.runpod.ai/v2/c2jx606dtqs7g8/status/{{ $('RunPod: Enviar Job').item.json.id }}",
+        "url": "=https://api.runpod.ai/v2/{{ $env.RUNPOD_ENDPOINT_ID }}/status/{{ $('RunPod: Enviar Job').item.json.id }}",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {}
@@ -90,7 +109,10 @@
       "name": "RunPod: Obtener Resultado",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1120, 300],
+      "position": [
+        1120,
+        300
+      ],
       "credentials": {
         "httpHeaderAuth": {
           "id": "runpod-auth",
@@ -106,20 +128,32 @@
       "name": "Parsear Respuesta IA",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1340, 300]
+      "position": [
+        1340,
+        300
+      ]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "https://aczkvxveenycpnwyqqbs.supabase.co/rest/v1/tramites_pipeline",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/tramites_pipeline",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Content-Type", "value": "application/json" },
-            { "name": "apikey", "value": "sb_publishable_G3rw372qkoXAmoEJBsSuAQ_xsjDUjFE" },
-            { "name": "Prefer", "value": "return=representation" }
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_ANON_KEY }}"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
           ]
         },
         "sendBody": true,
@@ -131,7 +165,10 @@
       "name": "Supabase: Guardar Trámite",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1560, 300],
+      "position": [
+        1560,
+        300
+      ],
       "credentials": {
         "httpHeaderAuth": {
           "id": "runpod-auth",
@@ -147,30 +184,89 @@
       "name": "Log Resultado",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1780, 300]
+      "position": [
+        1780,
+        300
+      ]
     }
   ],
   "connections": {
     "Gmail Trigger": {
-      "main": [[{ "node": "Preparar Prompt", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Preparar Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Preparar Prompt": {
-      "main": [[{ "node": "RunPod: Enviar Job", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "RunPod: Enviar Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "RunPod: Enviar Job": {
-      "main": [[{ "node": "Esperar RunPod", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Esperar RunPod",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Esperar RunPod": {
-      "main": [[{ "node": "RunPod: Obtener Resultado", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "RunPod: Obtener Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "RunPod: Obtener Resultado": {
-      "main": [[{ "node": "Parsear Respuesta IA", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Parsear Respuesta IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Parsear Respuesta IA": {
-      "main": [[{ "node": "Supabase: Guardar Trámite", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Supabase: Guardar Trámite",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Supabase: Guardar Trámite": {
-      "main": [[{ "node": "Log Resultado", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Log Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -180,7 +276,12 @@
     "errorWorkflow": ""
   },
   "staticData": null,
-  "tags": ["gmail", "tramite", "runpod", "supabase"],
+  "tags": [
+    "gmail",
+    "tramite",
+    "runpod",
+    "supabase"
+  ],
   "triggerCount": 0,
   "updatedAt": "2026-03-28T00:00:00.000Z",
   "versionId": "1"

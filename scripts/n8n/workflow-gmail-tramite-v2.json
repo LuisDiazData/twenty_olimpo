@@ -23,7 +23,10 @@
       "name": "Gmail Trigger",
       "type": "n8n-nodes-base.gmailTrigger",
       "typeVersion": 1,
-      "position": [240, 300],
+      "position": [
+        240,
+        300
+      ],
       "credentials": {
         "gmailOAuth2": {
           "id": "dOjcZbTWAE6HCxaM",
@@ -39,7 +42,10 @@
       "name": "Extraer Headers Email",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [460, 300]
+      "position": [
+        460,
+        300
+      ]
     },
     {
       "parameters": {
@@ -51,6 +57,10 @@
             {
               "name": "Content-Type",
               "value": "application/json"
+            },
+            {
+              "name": "X-API-Key",
+              "value": "={{ $env.INTERNAL_API_KEY }}"
             }
           ]
         },
@@ -74,7 +84,10 @@
       "name": "Check Reply",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [680, 300]
+      "position": [
+        680,
+        300
+      ]
     },
     {
       "parameters": {
@@ -102,7 +115,10 @@
       "name": "IF ¿Es Reply?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [900, 300]
+      "position": [
+        900,
+        300
+      ]
     },
     {
       "parameters": {
@@ -114,6 +130,10 @@
             {
               "name": "Content-Type",
               "value": "application/json"
+            },
+            {
+              "name": "X-API-Key",
+              "value": "={{ $env.INTERNAL_API_KEY }}"
             }
           ]
         },
@@ -161,7 +181,10 @@
       "name": "Process Reply",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1120, 160]
+      "position": [
+        1120,
+        160
+      ]
     },
     {
       "parameters": {
@@ -171,7 +194,10 @@
       "name": "Log Reply",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1340, 160]
+      "position": [
+        1340,
+        160
+      ]
     },
     {
       "parameters": {
@@ -181,7 +207,10 @@
       "name": "Preparar Datos Adjuntos",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1120, 440]
+      "position": [
+        1120,
+        440
+      ]
     },
     {
       "parameters": {
@@ -215,13 +244,25 @@
               "neverError": true
             }
           }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $env.INTERNAL_API_KEY }}"
+            }
+          ]
         }
       },
       "id": "call-fastapi",
       "name": "Procesar Adjuntos IA",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1340, 440]
+      "position": [
+        1340,
+        440
+      ]
     },
     {
       "parameters": {
@@ -231,12 +272,15 @@
       "name": "Preparar Prompt",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1560, 440]
+      "position": [
+        1560,
+        440
+      ]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "https://api.runpod.ai/v2/c2jx606dtqs7g8/run",
+        "url": "=https://api.runpod.ai/v2/{{ $env.RUNPOD_ENDPOINT_ID }}/run",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "sendHeaders": true,
@@ -263,7 +307,10 @@
       "name": "RunPod: Enviar Job",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1780, 440],
+      "position": [
+        1780,
+        440
+      ],
       "credentials": {
         "httpHeaderAuth": {
           "id": "3yUyaUSNFmBEVM2I",
@@ -280,12 +327,15 @@
       "name": "Esperar RunPod",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1,
-      "position": [2000, 440]
+      "position": [
+        2000,
+        440
+      ]
     },
     {
       "parameters": {
         "method": "GET",
-        "url": "=https://api.runpod.ai/v2/c2jx606dtqs7g8/status/{{ $('RunPod: Enviar Job').first().json.id }}",
+        "url": "=https://api.runpod.ai/v2/{{ $env.RUNPOD_ENDPOINT_ID }}/status/{{ $('RunPod: Enviar Job').first().json.id }}",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {}
@@ -294,7 +344,10 @@
       "name": "RunPod: Obtener Resultado",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2220, 440],
+      "position": [
+        2220,
+        440
+      ],
       "credentials": {
         "httpHeaderAuth": {
           "id": "3yUyaUSNFmBEVM2I",
@@ -310,7 +363,10 @@
       "name": "Parsear Respuesta IA",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2440, 440]
+      "position": [
+        2440,
+        440
+      ]
     },
     {
       "parameters": {
@@ -319,14 +375,17 @@
         "sendTo": "={{ $('Gmail Trigger').first().json.from?.value?.[0]?.address || $('Gmail Trigger').first().json.from }}",
         "subject": "=Recibimos su trámite — Folio {{ $json.folio }}",
         "emailType": "html",
-        "message": "=<p>Estimado/a {{ $json.nombreAgente || $json.emailOriginal.nombreRemitente || '' }},</p>\n\n<p>Hemos recibido correctamente su solicitud y le hemos asignado\nel siguiente folio de seguimiento:</p>\n\n<p style=\"font-size: 20px; font-weight: bold; color: #1B3A5C;\">\n  {{ $json.folio }}\n</p>\n\n<p>Su tr\u00e1mite est\u00e1 siendo procesado. En breve un especialista\nlo revisar\u00e1 y le contactar\u00e1 si requiere informaci\u00f3n adicional.</p>\n\n<p>Puede hacer referencia a este folio en cualquier comunicaci\u00f3n\nfutura con nuestro equipo.</p>\n\n<p>Equipo Hypnos<br>\ntramites@hypnos.com</p>",
+        "message": "=<p>Estimado/a {{ $json.nombreAgente || $json.emailOriginal.nombreRemitente || '' }},</p>\n\n<p>Hemos recibido correctamente su solicitud y le hemos asignado\nel siguiente folio de seguimiento:</p>\n\n<p style=\"font-size: 20px; font-weight: bold; color: #1B3A5C;\">\n  {{ $json.folio }}\n</p>\n\n<p>Su trámite está siendo procesado. En breve un especialista\nlo revisará y le contactará si requiere información adicional.</p>\n\n<p>Puede hacer referencia a este folio en cualquier comunicación\nfutura con nuestro equipo.</p>\n\n<p>Equipo Hypnos<br>\ntramites@hypnos.com</p>",
         "options": {}
       },
       "id": "send-acuse",
       "name": "Acuse: Email al Agente",
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2,
-      "position": [2660, 440],
+      "position": [
+        2660,
+        440
+      ],
       "credentials": {
         "gmailOAuth2": {
           "id": "dOjcZbTWAE6HCxaM",
@@ -337,7 +396,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://aczkvxveenycpnwyqqbs.supabase.co/rest/v1/tramites_pipeline",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/tramites_pipeline",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -347,11 +406,11 @@
             },
             {
               "name": "apikey",
-              "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFjemt2eHZlZW55Y3Bud3lxcWJzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ3NDQwODMsImV4cCI6MjA5MDMyMDA4M30.QBbLaY_FFnjpzcVoXniAQGESglUEQa-SXghvgZFFkTE"
+              "value": "={{ $env.SUPABASE_ANON_KEY }}"
             },
             {
               "name": "Authorization",
-              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFjemt2eHZlZW55Y3Bud3lxcWJzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ3NDQwODMsImV4cCI6MjA5MDMyMDA4M30.QBbLaY_FFnjpzcVoXniAQGESglUEQa-SXghvgZFFkTE"
+              "value": "=Bearer {{ $env.SUPABASE_ANON_KEY }}"
             },
             {
               "name": "Prefer",
@@ -361,21 +420,17 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "options": {
-          "response": {
-            "response": {
-              "neverError": true
-            }
-          }
-        },
-        "jsonBody": "={{ JSON.stringify({\n  folio: $('Parsear Respuesta IA').first().json.folio,\n  ramo: $('Parsear Respuesta IA').first().json.ramo,\n  tipo_tramite: $('Parsear Respuesta IA').first().json.tipoTramite,\n  estatus: $('Parsear Respuesta IA').first().json.estatus,\n  canal_ingreso: $('Parsear Respuesta IA').first().json.canalIngreso,\n  nombre_agente: $('Parsear Respuesta IA').first().json.nombreAgente,\n  email_agente: $('Parsear Respuesta IA').first().json.emailAgente,\n  clave_agente: $('Parsear Respuesta IA').first().json.claveAgente || null,\n  nombre_asegurado: $('Parsear Respuesta IA').first().json.nombreAsegurado || null,\n  numero_poliza: $('Parsear Respuesta IA').first().json.numeroPoliza || null,\n  monto: $('Parsear Respuesta IA').first().json.monto,\n  prioridad: $('Parsear Respuesta IA').first().json.prioridad,\n  resumen_ia: $('Parsear Respuesta IA').first().json.resumen,\n  accion_requerida: $('Parsear Respuesta IA').first().json.accionRequerida,\n  correo_asunto: $('Parsear Respuesta IA').first().json.emailOriginal.asunto,\n  correo_remitente: $('Parsear Respuesta IA').first().json.emailOriginal.remitente,\n  tiene_adjuntos: $('Parsear Respuesta IA').first().json.emailOriginal.tieneAdjuntos,\n  fecha_ingreso: $('Parsear Respuesta IA').first().json.fechaIngreso,\n  thread_id: $('Extraer Headers Email').first().json._headers.messageId,\n  message_id: $('Extraer Headers Email').first().json._headers.messageId,\n  metadata_ia: {\n    runpodJobId: $('Parsear Respuesta IA').first().json.runpodJobId,\n    procesadoEn: $('Parsear Respuesta IA').first().json.procesadoEn,\n    documentosAdjuntos: $('Parsear Respuesta IA').first().json.documentosAdjuntos\n  }\n}) }}",
-        "options": {}
+        "options": {},
+        "jsonBody": "={{ JSON.stringify({\n  folio: $('Parsear Respuesta IA').first().json.folio,\n  ramo: $('Parsear Respuesta IA').first().json.ramo,\n  tipo_tramite: $('Parsear Respuesta IA').first().json.tipoTramite,\n  estatus: $('Parsear Respuesta IA').first().json.estatus,\n  canal_ingreso: $('Parsear Respuesta IA').first().json.canalIngreso,\n  nombre_agente: $('Parsear Respuesta IA').first().json.nombreAgente,\n  email_agente: $('Parsear Respuesta IA').first().json.emailAgente,\n  clave_agente: $('Parsear Respuesta IA').first().json.claveAgente || null,\n  nombre_asegurado: $('Parsear Respuesta IA').first().json.nombreAsegurado || null,\n  numero_poliza: $('Parsear Respuesta IA').first().json.numeroPoliza || null,\n  monto: $('Parsear Respuesta IA').first().json.monto,\n  prioridad: $('Parsear Respuesta IA').first().json.prioridad,\n  resumen_ia: $('Parsear Respuesta IA').first().json.resumen,\n  accion_requerida: $('Parsear Respuesta IA').first().json.accionRequerida,\n  correo_asunto: $('Parsear Respuesta IA').first().json.emailOriginal.asunto,\n  correo_remitente: $('Parsear Respuesta IA').first().json.emailOriginal.remitente,\n  tiene_adjuntos: $('Parsear Respuesta IA').first().json.emailOriginal.tieneAdjuntos,\n  fecha_ingreso: $('Parsear Respuesta IA').first().json.fechaIngreso,\n  thread_id: $('Extraer Headers Email').first().json._headers.messageId,\n  message_id: $('Extraer Headers Email').first().json._headers.messageId,\n  metadata_ia: {\n    runpodJobId: $('Parsear Respuesta IA').first().json.runpodJobId,\n    procesadoEn: $('Parsear Respuesta IA').first().json.procesadoEn,\n    documentosAdjuntos: $('Parsear Respuesta IA').first().json.documentosAdjuntos\n  }\n}) }}"
       },
       "id": "supabase-insert",
       "name": "Supabase: Guardar Trámite",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2880, 440]
+      "position": [
+        2880,
+        440
+      ]
     },
     {
       "parameters": {
@@ -385,7 +440,10 @@
       "name": "Log Resultado",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [3100, 440]
+      "position": [
+        3100,
+        440
+      ]
     }
   ],
   "connections": {

@@ -11,7 +11,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 load_dotenv(dotenv_path=Path(__file__).parent.parent.parent / ".env")
 
-MODEL_NAME = os.getenv("LITELLM_MODEL")  # e.g. "runpod/c2jx606dtqs7g8" o "openai/gpt-4o"
+MODEL_NAME = os.getenv("LITELLM_MODEL")  # e.g. "openai/gpt-4o" — configura via LITELLM_MODEL en .env
 
 
 # ── RunPod OCR ─────────────────────────────────────────────────────────────────
@@ -20,8 +20,10 @@ def _llamar_runpod_ocr(imagen_b64: str) -> str:
     """Send a base64-encoded image to the RunPod serverless endpoint for OCR."""
     import requests
 
-    endpoint_id = os.environ["RUNPOD_ENDPOINT_ID"]
-    api_key     = os.environ["RUNPOD_API_KEY"]
+    endpoint_id = os.getenv("RUNPOD_ENDPOINT_ID", "")
+    api_key     = os.getenv("RUNPOD_API_KEY", "")
+    if not endpoint_id or not api_key:
+        raise RuntimeError("RUNPOD_ENDPOINT_ID y RUNPOD_API_KEY son requeridos para OCR")
     base_url    = f"https://api.runpod.ai/v2/{endpoint_id}"
 
     # Submit job

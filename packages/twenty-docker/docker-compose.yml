@@ -123,7 +123,7 @@ services:
     restart: always
 
   redis:
-    image: redis
+    image: redis:7.2-alpine
     restart: always
     command: ["--maxmemory-policy", "noeviction"]
     healthcheck:
@@ -133,7 +133,7 @@ services:
       retries: 10
 
   n8n:
-    image: n8nio/n8n:latest
+    image: n8nio/n8n:1.73.1
     ports:
       - "5678:5678"
     environment:

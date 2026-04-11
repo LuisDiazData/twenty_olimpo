@@ -11,7 +11,7 @@ import httpx
 import litellm
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from tenacity import retry, stop_after_attempt, wait_exponential
 import uvicorn
@@ -33,6 +33,7 @@ from supabase_client import (
     supabase as _sb,
 )
 import twenty_sync
+from auth import require_api_key, validate_env_vars, verify_twenty_webhook
 
 load_dotenv(dotenv_path=Path(__file__).parent.parent.parent / ".env")
 
@@ -46,9 +47,26 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Email Attachment Processor API")
-app.include_router(documentos_router,    prefix="/api/v1/agentes")
-app.include_router(asignacion_router,    prefix="/api/v1/agentes")
-app.include_router(email_ingest_router,  prefix="/api/v1")
+
+from fastapi.middleware.cors import CORSMiddleware
+
+_ALLOWED_ORIGINS = [o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_ALLOWED_ORIGINS or ["*"],  # en prod: configura CORS_ALLOWED_ORIGINS
+    allow_credentials=bool(_ALLOWED_ORIGINS),
+    allow_methods=["GET", "POST"],
+    allow_headers=["X-API-Key", "Content-Type", "Authorization"],
+)
+
+app.include_router(documentos_router,    prefix="/api/v1/agentes", dependencies=[Depends(require_api_key)])
+app.include_router(asignacion_router,    prefix="/api/v1/agentes", dependencies=[Depends(require_api_key)])
+app.include_router(email_ingest_router,  prefix="/api/v1",         dependencies=[Depends(require_api_key)])
+
+
+@app.on_event("startup")
+async def startup() -> None:
+    validate_env_vars()
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -178,7 +196,7 @@ def _build_supabase_public_url(storage_path: str) -> str:
     return f"{supabase_url}/storage/v1/object/public/{bucket_name}/{storage_path}"
 
 
-@app.post("/process-email")
+@app.post("/process-email", dependencies=[Depends(require_api_key)])
 async def process_email(
     # Formato n8n: JSON blob con adjuntos en base64
     email_data: str = Form(None),
@@ -347,7 +365,7 @@ class CheckReplyRequest(BaseModel):
     message_id: str
 
 
-@app.post("/check-reply")
+@app.post("/check-reply", dependencies=[Depends(require_api_key)])
 async def check_reply(data: CheckReplyRequest):
     """
     Check if a Gmail thread already has an active tramite in Supabase.
@@ -375,7 +393,7 @@ class ProcessReplyRequest(BaseModel):
     email_body: str = ""
 
 
-@app.post("/process-reply")
+@app.post("/process-reply", dependencies=[Depends(require_api_key)])
 async def process_reply(data: ProcessReplyRequest):
     """
     Handle a reply email:
@@ -417,7 +435,7 @@ async def health():
     return {"status": "ok", "ts": datetime.utcnow().isoformat()}
 
 
-@app.post("/webhook/twenty")
+@app.post("/webhook/twenty", dependencies=[Depends(verify_twenty_webhook)])
 async def twenty_webhook(payload: dict):
     """
     Recibe eventos de Twenty CRM via webhook (Settings > Webhooks).
@@ -529,7 +547,7 @@ class AutoFolioRequest(BaseModel):
     tramite_id: str
 
 
-@app.post("/auto-folio")
+@app.post("/auto-folio", dependencies=[Depends(require_api_key)])
 async def auto_folio(data: AutoFolioRequest):
     """
     Generate and assign the next sequential folio to a tramite.
@@ -595,7 +613,7 @@ class AutoAsignacionRequest(BaseModel):
     ramo: str
 
 
-@app.post("/auto-asignacion")
+@app.post("/auto-asignacion", dependencies=[Depends(require_api_key)])
 async def auto_asignacion(data: AutoAsignacionRequest):
     """
     Look up the configured Asignacion for (agente, ramo) and assign
@@ -690,7 +708,7 @@ class AutoSlaRequest(BaseModel):
     ramo: str
 
 
-@app.post("/auto-sla")
+@app.post("/auto-sla", dependencies=[Depends(require_api_key)])
 async def auto_sla(data: AutoSlaRequest):
     """
     Calculate and set fechaLimiteSla on a tramite based on ramo SLA rules.
@@ -720,7 +738,7 @@ async def auto_sla(data: AutoSlaRequest):
     return {"fecha_limite": fecha_str}
 
 
-@app.post("/mark-overdue-sla")
+@app.post("/mark-overdue-sla", dependencies=[Depends(require_api_key)])
 async def mark_overdue_sla():
     """
     Cron endpoint: find all tramites past their SLA deadline and mark fueraDeSla=true.
@@ -911,7 +929,7 @@ class ComprensionRequest(BaseModel):
     cuerpo_texto: str = ""
 
 
-@app.post("/api/v1/agentes/comprension")
+@app.post("/api/v1/agentes/comprension", dependencies=[Depends(require_api_key)])
 async def agente_comprension(data: ComprensionRequest):
     """
     Agente 1 — Comprensión de email con LiteLLM.
@@ -1032,4 +1050,4 @@ async def agente_comprension(data: ComprensionRequest):
 
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=4000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=4000, reload=False)

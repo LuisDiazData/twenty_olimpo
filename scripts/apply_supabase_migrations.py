@@ -21,11 +21,11 @@ import sys
 import os
 from pathlib import Path
 
-PROJECT_REF = "aczkvxveenycpnwyqqbs"
-DB_HOST = "aws-0-us-east-1.pooler.supabase.com"
-DB_PORT = "5432"
-DB_USER = f"postgres.{PROJECT_REF}"
-DB_NAME = "postgres"
+PROJECT_REF = os.getenv("SUPABASE_PROJECT_REF", "")
+DB_HOST = os.getenv("SUPABASE_DB_HOST", "aws-0-us-east-1.pooler.supabase.com")
+DB_PORT = os.getenv("SUPABASE_DB_PORT", "5432")
+DB_USER = os.getenv("SUPABASE_DB_USER", f"postgres.{PROJECT_REF}")
+DB_NAME = os.getenv("SUPABASE_DB_NAME", "postgres")
 
 MIGRATIONS_DIR = Path(__file__).parent / "supabase" / "migrations"
 DOCKER_CONTAINER = "twenty-db-1"

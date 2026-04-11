@@ -1,7 +1,8 @@
 {
-  "buildCommand": "npx nx build twenty-shared && npx nx build twenty-front",
+  "buildCommand": "NODE_OPTIONS=--max-old-space-size=8192 npx nx build twenty-shared && NODE_OPTIONS=--max-old-space-size=8192 npx nx build twenty-front",
   "outputDirectory": "packages/twenty-front/build",
   "framework": null,
+  "installCommand": "yarn install --frozen-lockfile",
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
   ],

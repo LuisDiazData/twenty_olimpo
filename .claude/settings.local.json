@@ -10,7 +10,10 @@
       "Bash(sudo docker:*)",
       "Bash(ls:*)",
       "Bash(curl:*)",
-      "Bash(jq '.data.objects.edges[] | select\\(.node.isCustom == true\\) | .node | \"\\\\\\(.nameSingular\\):\\\\\\(.id\\)\"' -r)"
+      "Bash(jq '.data.objects.edges[] | select\\(.node.isCustom == true\\) | .node | \"\\\\\\(.nameSingular\\):\\\\\\(.id\\)\"' -r)",
+      "Bash(grep -r \"if __name__\" /home/lag/Documentos/twenty_olimpo/scripts/attachment_processor/*.py)",
+      "Bash(grep -rh \"os\\\\.getenv\\\\|os\\\\.environ\" /home/lag/Documentos/twenty_olimpo/scripts/attachment_processor/*.py)",
+      "Bash(find:*)"
     ]
   },
   "enabledMcpjsonServers": [

@@ -57,3 +57,4 @@ TRANSLATION_QA_REPORT.md
 .env
 .env.pipeline
 .env.tmp
+scripts/n8n/*_hardcoded.json
